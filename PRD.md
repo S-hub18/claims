@@ -54,12 +54,6 @@ documents          required   one or more images/PDFs
 
 ---
 
-## 2.1 Policy as runtime input
-
-Every limit, percentage, list, and threshold in this spec is read at runtime from the loaded `policy_terms.json` — nothing is hardcoded. The assignment requires this explicitly: *"Your system must read and apply these rules from the file."* The values shown in §6 and in the TC validation lines throughout §4 are snapshots of the current policy for verification only; the rules themselves reference policy paths, not constants.
-
----
-
 ## 3. End-to-End User Flow
 
 ```
@@ -74,8 +68,6 @@ Every limit, percentage, list, and threshold in this spec is read at runtime fro
    └──────────────────────────────────────┬─────────────────────────────────────────┘
                                            ▼
    ┌──────────────────────  STAGE 2: DOCUMENT EXTRACTION  ─────────────────────────┐
-   │  Documents extract IN PARALLEL. Each result streamed to UI immediately (SSE)   │
-   │  as it completes — user sees live per-document status, not a spinner.           │
    │  For each uploaded file:                                                       │
    │   • split if one file embeds multiple doc types (§8.5)                         │
    │   • classify type · assess readability · extract fields                        │
@@ -83,21 +75,12 @@ Every limit, percentage, list, and threshold in this spec is read at runtime fro
    │      amounts, dates) — each with confidence + source snippet                   │
    │   • low-confidence load-bearing field on a readable doc → re-read once (§4.2)  │
    └──────────────────────────────────────┬─────────────────────────────────────────┘
-                                           ▼  (all docs extracted; gate fires once)
-   ┌──────────────  STAGE 3: DOCUMENT VERIFICATION GATE (collect-all)  ─────────────┐
-   │  Gate collects ALL problems before responding — never stops at the first one.   │
-   │  User gets one actionable message listing everything to fix, not a series of    │
-   │  round trips. Dependency rule: if a doc is unreadable, skip type/patient        │
-   │  checks for that doc (don't report phantom failures from the same root cause).  │
-   │                                                                                 │
-   │  Checks run across all docs:                                                    │
-   │  3a readability  — any required doc unreadable → add to issues list (TC002)     │
-   │  3b required types — missing/wrong types → add to issues list (TC001)           │
-   │  3c patient match — any readable doc's patient ≠ member/dependent → add (TC003) │
-   │  3d critical field missing — add to issues list                                 │
-   │                                                                                 │
-   │  issues list empty → proceed   │   issues list non-empty → STOP, emit ALL at    │
-   │                                │   once: "fix these N problems and resubmit"    │
+                                           ▼
+   ┌──────────────  STAGE 3: DOCUMENT VERIFICATION GATE (after extraction)  ────────┐
+   │  3a required types present for category?  ── no ─► STOP: WRONG/MISSING (TC001)  │
+   │  3b every required doc readable?          ── no ─► STOP: re-upload that doc      │
+   │                                                     (TC002 — do NOT reject)     │
+   │  3c all docs same patient = member/dependent? no ─► STOP: name both (TC003)     │
    └──────────────────────────────────────┬─────────────────────────────────────────┘
                                            ▼  (documents are valid; begin adjudication)
    ┌──────────────────────  STAGE 4: SEMANTIC MAPPING  ────────────────────────────┐
@@ -136,7 +119,7 @@ Every limit, percentage, list, and threshold in this spec is read at runtime fro
 
 ### 4.1 Intake validation
 - **Member exists:** `member_id` must be in `members[]`. Else **STOP** — "Member not found on policy."
-- **Minimum amount:** `claimed_amount ≥ policy.submission_rules.minimum_claim_amount`. Else **STOP**.
+- **Minimum amount:** `claimed_amount ≥ submission_rules.minimum_claim_amount` (₹500). Else **STOP**.
 - **Submission deadline:** `submission_rules.deadline_days_from_treatment` = 30. **Disabled for the eval** (all test dates are 2024; measuring against the current date would reject all 12 — see §8.3).
 
 ### 4.2 Document extraction
@@ -146,19 +129,15 @@ Every limit, percentage, list, and threshold in this spec is read at runtime fro
 - **Self-correction:** if a *load-bearing* field (per §4.13) is null/low-confidence on a *readable* doc, re-read once with a stronger model; keep the higher-confidence value. Never blocks the critical path.
 - **Output:** one `ExtractionResult` per document.
 
-### 4.3 Document verification gate — **collect-all, report once** (runs after extraction)
-The gate runs after all documents have been extracted. It collects every member-solvable problem across all documents, then emits a single response listing all issues. This prevents the whack-a-mole UX of discovering one problem per resubmission.
-
-**Dependency rule:** if a document is unreadable (3a), skip type and patient checks for that document — phantom downstream failures from the same root cause must not be reported separately.
-
-Checks applied across all documents:
-1. **Readability (3a):** for each required doc, if `readable=false` → add to issues: "re-upload [doc name] — it could not be read." *Never reject for this.* — **TC002**
-2. **Required types (3b):** compare all uploaded types vs `policy.document_requirements[category].required`. Missing type → add to issues, naming what was uploaded and what is needed. Out-of-category type → note it as unused. — **TC001:** two PRESCRIPTIONs for CONSULTATION → "you uploaded two prescriptions; a hospital bill is still needed."
-3. **Patient consistency (3c):** for each *readable* doc, patient name must resolve to the member or a covered dependent. Mismatch → add to issues, naming the conflicting names on each document. — **TC003:** Rx "Rajesh Kumar" vs bill "Arjun Mehta" → both names surfaced.
-4. **Missing critical field:** readable doc with no bill total and no line items → add to issues, ask member to supply.
-
-If issues list is empty → proceed to adjudication.
-If issues list is non-empty → **STOP**, return all issues in one message: *"We found N problems — fix these and resubmit: …"*
+### 4.3 Document verification gate — **runs after extraction** (critical: see §8.1)
+Order of checks (first failure STOPs):
+1. **Readability (3b):** any required doc `readable=false` → **STOP**, ask re-upload of *that specific* document, keep the rest. *Never reject for this.* — **TC002**
+2. **Required types present (3a):** compare uploaded types vs `document_requirements[category].required`.
+   - Missing a required type → **STOP**. Message names *what was uploaded* and *what is still needed*.
+   - If an out-of-category type was uploaded → call it out as "not used for a {category} claim."
+   - **TC001:** two PRESCRIPTIONs for CONSULTATION (needs PRESCRIPTION + HOSPITAL_BILL) → "you uploaded prescriptions; a hospital bill is required."
+3. **Patient consistency (3c):** every doc's patient must resolve to the **member or a covered dependent**. Mismatch → **STOP**, naming the conflicting names. — **TC003** (Rx "Rajesh Kumar" vs bill "Arjun Mehta"; Arjun Mehta is neither the member nor dependent Arjun *Kumar*).
+4. **Missing decision-critical field** (readable doc, but e.g. a bill with no total and no line items) → **STOP**, ask the member to supply it. (Narrow; never guesses.)
 
 ### 4.4 Semantic mapping
 Bridges messy text → policy keys. Produces:
@@ -169,9 +148,9 @@ Bridges messy text → policy keys. Produces:
 
 ### 4.5 Rule — Waiting Period
 `days_enrolled = treatment_date − member.join_date`.
-- **Initial wait:** if `days_enrolled < policy.waiting_periods.initial_waiting_period_days` → **FAIL** (`WAITING_PERIOD`).
-- **Condition-specific:** if `waiting_condition` set and `days_enrolled < policy.waiting_periods.specific_conditions[condition]` → **FAIL**. State eligible date = `member.join_date + waiting_days`.
-- **Pre-existing:** if a PED marker is present and `days_enrolled < policy.waiting_periods.pre_existing_conditions_days` → **FAIL** (enforced only when member data carries the marker; none do in the eval).
+- **Initial wait:** if `days_enrolled < initial_waiting_period_days` (30) → **FAIL** (`WAITING_PERIOD`).
+- **Condition-specific:** if `waiting_condition` set and `days_enrolled < specific_conditions[condition]` → **FAIL**. State eligible date = `join_date + waiting_days`.
+- **Pre-existing:** if a PED marker is present and `days_enrolled < 365` → **FAIL** (enforced only when member data carries the marker; none do in the eval).
 - Otherwise **PASS**.
 - **TC005:** EMP005 joined `2024-09-01`, treatment `2024-10-15` → 44 days. diabetes wait = 90. `44 < 90` → **FAIL**; eligible from `2024-09-01 + 90d = 2024-11-30`. (Note: 44 > 30, so the *initial* wait passes; the *diabetes* wait binds.)
 
@@ -187,59 +166,42 @@ Two distinct mechanisms — **do not conflate** (this is what separates TC012 RE
 **(c) Coverage check** — for DENTAL/VISION, a line must be in `covered_procedures`/`covered_items` to be payable.
 
 ### 4.7 Rule — Pre-Authorization
-- For **DIAGNOSTIC**: if a high-value test (in `policy.opd_categories.diagnostic.high_value_tests_requiring_pre_auth`) is present **and** `claimed_amount > policy.opd_categories.diagnostic.pre_auth_threshold` **and** no pre-auth on file → **FAIL** (`PRE_AUTH_MISSING`). Tell the member to obtain pre-auth and resubmit.
-- **General:** any procedure in `policy.pre_authorization.required_for` → pre-auth required regardless of amount.
+- For **DIAGNOSTIC**: if a high-value test (`high_value_tests_requiring_pre_auth` = MRI, CT Scan, PET Scan) is present **and** `claimed_amount > pre_auth_threshold` (₹10,000) **and** no pre-auth on file → **FAIL** (`PRE_AUTH_MISSING`). Tell the member to obtain pre-auth and resubmit.
+- General `pre_authorization.required_for`: PET scan (any amount), major surgery, planned hospitalization → pre-auth required.
 - **Assumption:** pre-auth is *absent unless explicitly supplied* (no submission field provides one; no test supplies one).
 - **TC007:** DIAGNOSTIC, MRI Lumbar Spine, ₹15,000 > ₹10,000, no pre-auth → **REJECTED**.
 
 ### 4.8 Rule — Limits  *(category-aware — see §8.1 A5; a blanket "claimed > ₹5,000 → reject" FAILS TC006)*
-> **⚠ Documented INTERPRETATION CALL, expressed over policy keys (not a literal policy rule).** The policy gives a global `coverage.per_claim_limit` *and* a per-category `opd_categories[c].sub_limit` but never states how they interact. The data forces the resolution: TC008 (consultation, covered ₹7,500) REJECTS on per-claim-limit, yet TC006 (dental, covered ₹8,000 — also > ₹5,000) is APPROVED; TC010 (consultation ₹4,500) is approved in full, proving the ₹2,000 consultation sub-limit is *not* a whole-claim cap. The only reading consistent with all three:
+The per-claim ceiling is **category-aware**, evaluated on the **covered** amount (after line-item exclusions), not raw `claimed_amount`:
 
-The per-claim ceiling is **category-aware**, read from the policy, evaluated on the **covered** amount (after line-item exclusions), not raw `claimed_amount`:
+> **binding_ceiling = max(per_claim_limit ₹5,000, category sub_limit)**
 
-> **binding_ceiling = max(`policy.coverage.per_claim_limit`, `policy.opd_categories[category].sub_limit`)**
-
-- **When `per_claim_limit` is the binding cap** (i.e. it is ≥ the category sub_limit): `covered > per_claim_limit` → **FAIL `PER_CLAIM_EXCEEDED`** (HARD REJECT). State both values. — *TC008: consultation covered ₹7,500 > per_claim_limit ₹5,000 → REJECTED.*
-- **When the category sub-limit is the binding cap** (i.e. it exceeds `per_claim_limit`): `covered > sub_limit` → **CAP** to sub_limit, do not reject. — *TC006: dental sub_limit ₹10,000 > per_claim_limit ₹5,000; covered ₹8,000 ≤ sub_limit → PARTIAL ₹8,000.*
-- **Consultation per-LINE sub-limit:** `policy.opd_categories.consultation.sub_limit` caps the consultation-fee line only, applied in §4.10 — separate from the whole-claim reject above (§8.1 A1). *TC010: post-discount consultation line ₹1,080 < sub_limit ₹2,000 → no cap; total approved ₹3,240.*
-- **Alt-medicine session limit:** `sessions_billed + ytd_sessions` must not exceed `policy.opd_categories.alternative_medicine.max_sessions_per_year`. Exceeded → CAP remaining; no sessions left → REJECTED. (Not exercised in eval — TC011 bills 5 sessions.)
-- **Annual OPD limit:** if `ytd_claims_amount + approved > policy.coverage.annual_opd_limit` → cap the excess. (Not binding in eval.)
-- **Sum insured:** cumulative utilisation must not exceed `policy.coverage.sum_insured_per_employee`.
-- **Family floater:** `policy.coverage.family_floater.combined_limit` across member + covered family. Enforced when family utilisation is supplied (not in eval).
+- **When ₹5,000 is the binding cap** (category sub_limit ≤ ₹5,000 → **CONSULTATION** ₹2,000, **VISION** ₹5,000): covered > ₹5,000 → **FAIL `PER_CLAIM_EXCEEDED`** (HARD REJECT). State the limit + amount. — **TC008** (consultation covered ₹7,500 > ₹5,000 → REJECTED).
+- **When the category sub-limit is the binding cap** (sub_limit > ₹5,000 → **DENTAL/DIAGNOSTIC** ₹10,000, **PHARMACY** ₹15,000, **ALT-MED** ₹8,000): covered > sub_limit → **CAP (reduce)** to sub_limit; *do not reject*. — **TC006** (dental covered ₹8,000 ≤ ₹10,000 → PARTIAL ₹8,000, NOT rejected despite claimed ₹12,000).
+- **Why category-aware:** a global ₹5,000 reject would (a) wrongly reject TC006 and (b) make the ₹8,000–₹15,000 sub-limits unreachable. Per-claim-limit binds only where it is the *lowest applicable* cap.
+- **Consultation also has a per-LINE sub-limit:** the ₹2,000 caps the consultation-fee *line* (applied in §4.10) — separate from the ₹5,000 whole-claim reject above (see §8.1 A1).
+- **Annual OPD limit:** if `ytd_claims_amount + approved > annual_opd_limit` (₹50,000) → cap the excess. (Not binding in eval; max ytd given is ₹10,000.)
+- **Sum insured:** `sum_insured_per_employee` (₹500,000) is the overall annual ceiling — checked against cumulative utilisation (far above any single eval value).
+- **Family floater:** combined ₹150,000 across member + covered family. Enforced when family utilisation is supplied (not in eval).
 
 ### 4.9 Rule — Fraud & Anomaly → produces **FLAG** (never auto-reject)
-**Verdict is deterministic.** The LLM never decides fraud — it only surfaces *perceptual evidence* during extraction (Track 2). All scoring and thresholds are code, for reproducible traces.
-
-Two tracks run at **different times**, both **off the critical path** (never delay the member-facing decision), and are **applied only at aggregation — never short-circuited** (a definitive REJECTED outranks a fraud FLAG — §8.2 B3; e.g. a 4th same-day claim that is *also* an excluded condition must REJECT, not MANUAL_REVIEW).
-
-**Track 1 — Velocity (fires at INTAKE, parallel with extraction; needs no documents):**
-Reads claim metadata against the persistent **claims ledger** (below), not just the inline payload.
-- **Same-day:** ledger count for `member_id` on `treatment_date` (incl. this claim) `> policy.fraud_thresholds.same_day_claims_limit` → **FLAG**. — *TC009: 4 same-day > limit → MANUAL_REVIEW.*
-- **Monthly:** month-window count `> policy.fraud_thresholds.monthly_claims_limit` → **FLAG**.
-- **High value:** `claimed_amount ≥ policy.fraud_thresholds.auto_manual_review_above` → **FLAG**.
-
-**Track 2 — Document anomaly (runs AFTER extraction, parallel with the gate + rule checks):**
-- Extraction surfaces signals: altered/overwritten amounts, conflicting ORIGINAL/DUPLICATE stamps, line items not summing to bill total, mismatched dates across docs.
-- Signals combine into a fraud score; `≥ policy.fraud_thresholds.fraud_score_manual_review_threshold` → **FLAG**.
-
-**Claims ledger (stateful, deterministic):** every processed claim is recorded keyed by `member_id` (and provider/hospital). Velocity becomes an indexed query — instant at scale, and the honest implementation of `monthly_claims_limit`, which presupposes cross-claim history. Repeat-offender / known-bad-provider checks are deterministic lookups against accumulated state.
-- **Eval determinism (trap):** the ledger must NOT leak state across eval runs. Each test case seeds the ledger from its own `claims_history` / `ytd_claims_amount` and runs against an **isolated namespace that resets per case** — otherwise re-running the 12 cases inflates velocity counts (a TC009-class nondeterminism bug).
-- The *adaptive / learning* extension (entity risk graphs, collusion detection, ML scoring) is deferred — see `FUTURE_DIRECTIONS.md`.
+- **Same-day velocity:** count claims (incl. the current one) on `treatment_date`. If `> same_day_claims_limit` (2) → **FLAG**. — **TC009** (3 history + 1 current = 4 > 2 → MANUAL_REVIEW).
+- **Monthly velocity:** if month count `> monthly_claims_limit` (6) → **FLAG**.
+- **High value:** if `claimed_amount ≥ auto_manual_review_above` (₹25,000) → **FLAG**.
+- **Document anomalies:** extraction `fraud_signals` (altered/overwritten amounts, conflicting ORIGINAL/DUPLICATE stamps, line items not summing to total) contribute to a fraud score; `≥ fraud_score_manual_review_threshold` (0.80) → **FLAG**.
+- A FLAG routes an otherwise-approvable claim to **MANUAL_REVIEW** (it does not override a definitive rejection — §5).
 
 ### 4.10 Financial calculation — **order is load-bearing** (TC010)
 ```
 1. covered_lines  = line items minus (whole-claim excluded? none here) minus disallowed lines (§4.6b)
-2. reconcile      = assert Σ(line_items) ≈ bill_total; if they diverge materially, use Σ(line_items)
-                    and surface the discrepancy as an anomaly signal (do not block the calc)
-3. gross          = Σ covered_lines        (fallback: bill total, else claimed_amount)
-3. discount_pct   = policy.opd_categories[category].network_discount_percent
-                    if hospital ∈ policy.network_hospitals else 0
+2. gross          = Σ covered_lines        (fallback: bill total, else claimed_amount)
+3. discount_pct   = network_discount_percent if hospital ∈ network_hospitals else 0
+                    (consultation 20%, diagnostic 10%, all others 0%)
    post_discount  = gross − gross × discount_pct          ── NETWORK DISCOUNT FIRST
-4. copay_pct      = policy.opd_categories[category].copay_percent
-                    (pharmacy branded lines: policy.opd_categories.pharmacy.branded_drug_copay_percent)
+4. copay_pct      = copay_percent (consultation 10%, others 0%; pharmacy branded lines 30%)
    approved       = post_discount − post_discount × copay_pct   ── CO-PAY ON POST-DISCOUNT
-5. sub-limit cap  = consultation: cap the consultation-fee line at policy.opd_categories.consultation.sub_limit (per-line)
-                    others: cap `approved` at policy.opd_categories[category].sub_limit
+5. sub-limit cap  = consultation: cap the consultation-fee line at ₹2,000 (per-line)
+                    others: cap `approved` at category sub_limit
 6. approved_amount = result    (all arithmetic in exact decimal; no float drift)
 ```
 Validation:
@@ -299,11 +261,9 @@ Overlay: component failure → keep status, add "manual review recommended" + lo
 
 ---
 
-## 6. Policy Reference — *snapshot of the current `policy_terms.json`*
+## 6. Policy Reference (from `policy_terms.json`)
 
-> ⚠️ These numbers are a **read-only snapshot** of `PLUM_GHI_2024` for validating §4–§5, **not** constants the engine embeds. Every value below is read at runtime (§2.1); a different policy.json changes them all without a code change. The path each value lives at is shown so the engine references the *key*, not the literal.
-
-**Coverage** (`coverage.*`)**:** sum insured 500,000 · annual OPD 50,000 · **per-claim 5,000** · family floater 150,000
+**Coverage:** sum insured 500,000 · annual OPD 50,000 · **per-claim 5,000** · family floater 150,000
 
 **Categories**
 
