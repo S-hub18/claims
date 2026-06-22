@@ -1,0 +1,28 @@
+[project]
+name = "claims-backend"
+version = "0.1.0"
+description = "Health insurance claims processing — blackboard adjudication engine"
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=1.0",
+    "python-dotenv>=1.0",
+    "fastapi[standard]>=0.115",
+    "uvicorn>=0.29",
+    "httpx2>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "redis>=5.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning:starlette"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
