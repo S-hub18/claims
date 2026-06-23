@@ -101,6 +101,7 @@ class DecisionResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
     confidence: float | None = None
     fact_count: int = 0
+    preliminary_decision: str | None = None
 
 
 def fact_to_event(fact: Any) -> FactEvent:

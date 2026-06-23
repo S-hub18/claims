@@ -1,0 +1,22 @@
+# Secrets / environment
+.env
+.env.local
+*.env
+
+# OS junk
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Test scaffolding / local artifacts (not part of the backend)
+backend/app/api/test_ui.html
+backend/assignment
+test_documents/

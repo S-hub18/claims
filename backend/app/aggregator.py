@@ -73,6 +73,33 @@ class DecisionAggregator:
             else []
         )
 
+        # 0. System failure during extraction → PROCESSING_ERROR (highest priority).
+        # A quota/network/5xx failure means we could NOT read the documents — there is
+        # no valid claim decision to make. This must never be silently downgraded to
+        # BLOCKED ("unreadable, re-upload") or proceed to a fabricated APPROVED/REJECTED.
+        extraction_errors = [
+            f
+            for f in facts
+            if f.key.startswith("extraction.")
+            and isinstance(f.value, dict)
+            and f.value.get("system_error")
+        ]
+        if extraction_errors:
+            return Decision(
+                status="PROCESSING_ERROR",
+                messages=[
+                    f.value.get("message", "Document extraction failed.")
+                    for f in extraction_errors
+                ],
+                notes=[
+                    "This claim could not be adjudicated because the document-reading "
+                    "service failed. This is a system/service error, not a problem with "
+                    "the documents themselves. Please retry shortly."
+                ],
+                confidence=0.0,
+                trace=facts,
+            )
+
         # 1. Document problem present → BLOCKED (the gate posts in Part 2).
         gate = bb.get("gate")
         if gate is not None and gate.value.get("blocked"):
@@ -84,7 +111,7 @@ class DecisionAggregator:
             )
 
         verdicts = [f for f in facts if f.key.startswith("verdict.")]
-        coverage = bb.get("coverage")
+        coverage = bb.get("coverage.revised") or bb.get("coverage")
 
         # 2. Any definitive violation → REJECTED, reasons ranked (Part 4). Sources: the
         # rule agents' ``verdict.*`` rejects plus a whole-claim exclusion from coverage.
@@ -128,6 +155,18 @@ class DecisionAggregator:
                 status="MANUAL_REVIEW",
                 approved_amount=approved_amount,
                 messages=[f.value["message"] for f in manual if f.value.get("message")],
+                notes=fin_notes + overlay,
+                confidence=confidence,
+                trace=facts,
+            )
+
+        # Policy reasoning flagged genuine ambiguity → MANUAL_REVIEW.
+        if bb.has("flag.ambiguity"):
+            flag = bb.get("flag.ambiguity")
+            return Decision(
+                status="MANUAL_REVIEW",
+                approved_amount=approved_amount,
+                messages=[flag.value.get("message", "")],
                 notes=fin_notes + overlay,
                 confidence=confidence,
                 trace=facts,

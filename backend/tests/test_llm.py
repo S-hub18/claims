@@ -108,12 +108,15 @@ def test_gemini_extracts_prescription_image():
     )
     from google.genai import errors as genai_errors
 
+    from app.llm.gemini import LLMUnavailableError
+
     client = GeminiClient(api_key=GEMINI_API_KEY)
     try:
         result = asyncio.run(client.extract("live_test", tiny_jpeg, mime_type="image/jpeg"))
-    except genai_errors.ClientError as exc:
+    except (genai_errors.ClientError, LLMUnavailableError) as exc:
         # Quota exhausted, billing not enabled, or unprocessable test image —
-        # any of these are environment issues, not code bugs.
+        # any of these are environment issues, not code bugs. The client now wraps
+        # system failures in LLMUnavailableError, so accept either.
         pytest.skip(f"Gemini API not usable in this environment: {exc}")
 
     # With a near-blank image the model should still return a valid schema.

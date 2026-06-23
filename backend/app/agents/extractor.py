@@ -24,11 +24,26 @@ from app.llm.base import ExtractionResult, LLMClient
 from app.policy import Policy
 
 
+def _normalized_doc_type(doc_type: str | None, line_items: Any, total: Any) -> str | None:
+    """A document that itemises charges and a total IS a bill, whatever the model labelled
+    it. Vision models routinely mislabel a real bill as DENTAL_REPORT / LAB_REPORT / etc.;
+    five downstream consumers (the gate, semantic mapper, financial agents, cross-checks)
+    identify "the bill" by a ``*BILL`` doc_type, so a mislabel would lose the bill entirely.
+    Retype charge-bearing documents to HOSPITAL_BILL; leave charge-less reports untouched
+    (a genuine report with no charges still correctly fails the required-bill gate)."""
+    has_charges = bool(line_items) or total is not None
+    if has_charges and not (doc_type or "").upper().endswith("BILL"):
+        return "HOSPITAL_BILL"
+    return doc_type
+
+
 def _result_to_value(result: ExtractionResult) -> dict[str, Any]:
     """Normalise an ExtractionResult into the extraction fact's value dict."""
     return {
         "file_id": result.file_id,
-        "doc_type": result.doc_type,
+        "doc_type": _normalized_doc_type(
+            result.doc_type, result.line_items, result.total_amount
+        ),
         "readable": result.readable,
         "quality": result.quality,
         "patient_name": result.patient_name,
@@ -82,9 +97,33 @@ class DocExtractor(Agent):
             data: bytes = doc["data"]
             mime = doc.get("mime_type", "image/jpeg")
             hint = doc.get("actual_type")
-            result = await self.llm_client.extract(
-                file_id=self.file_id, data=data, mime_type=mime, hint_type=hint
-            )
+            try:
+                result = await self.llm_client.extract(
+                    file_id=self.file_id, data=data, mime_type=mime, hint_type=hint
+                )
+            except Exception as exc:
+                # A *system* failure (quota/network/5xx), NOT a document-quality verdict.
+                # We must surface this distinctly — never let it masquerade as an
+                # unreadable document, and never let downstream agents adjudicate on
+                # empty extraction data. The aggregator short-circuits on system_error.
+                kind = getattr(exc, "kind", "UNKNOWN")
+                friendly = {
+                    "QUOTA": "The document-reading service is over its quota right now.",
+                    "NETWORK": "Could not reach the document-reading service.",
+                    "SERVER": "The document-reading service returned an error.",
+                }.get(kind, "The document-reading service failed.")
+                return Fact(
+                    key=self.writes,
+                    value={
+                        "file_id": self.file_id,
+                        "system_error": True,
+                        "error_kind": kind,
+                        "message": f"{friendly} ({exc})",
+                        "readable": None,  # unknown — NOT a readability verdict
+                    },
+                    author=self.name,
+                    degraded=True,
+                )
             return Fact(
                 key=self.writes,
                 value=_result_to_value(result),
@@ -113,7 +152,9 @@ class DocExtractor(Agent):
             value={
                 "file_id": self.file_id,
                 "file_name": doc.get("file_name"),
-                "doc_type": doc.get("actual_type"),
+                "doc_type": _normalized_doc_type(
+                    doc.get("actual_type"), content.get("line_items"), content.get("total")
+                ),
                 "readable": quality != "UNREADABLE",
                 "quality": quality,
                 "patient_name": patient_name,

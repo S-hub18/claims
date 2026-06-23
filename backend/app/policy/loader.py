@@ -71,7 +71,13 @@ class Policy:
     def is_network_hospital(self, name: str | None) -> bool:
         if not name:
             return False
-        return any(name.strip().lower() == h.strip().lower() for h in self.network_hospitals())
+        n = name.strip().lower()
+        return any(
+            n == h.strip().lower()          # exact: "Apollo Hospitals" == "Apollo Hospitals"
+            or n in h.strip().lower()       # partial: "apollo hospital" in "apollo hospitals"
+            or h.strip().lower() in n       # reverse: "apollo hospitals" in "apollo hospitals delhi"
+            for h in self.network_hospitals()
+        )
 
     def min_claim_amount(self) -> Any:
         return self.get("submission_rules.minimum_claim_amount")

@@ -52,12 +52,38 @@ class DocGate(Agent):
 
         # 1. Readability.
         for doc in docs:
+            # A system extraction failure (quota/network) is not a readability verdict —
+            # the aggregator surfaces it as PROCESSING_ERROR. Don't tell the member to
+            # re-upload a document that was never actually assessed.
+            if doc.get("system_error"):
+                continue
             if not doc.get("readable"):
                 label = doc.get("doc_type") or "document"
                 ref = doc.get("file_name") or doc.get("file_id")
                 issues.append(
                     f"The {label} ({ref}) could not be read. "
                     f"Please re-upload a clear photo of your {label}."
+                )
+
+        # 1b. Usable-bill check. A bill the model called "readable" but from which NO
+        # charges and NO total could be extracted (e.g. a blurred photo) is useless for
+        # adjudication — we cannot verify the claimed amount against it. Treat it as a
+        # readability failure and ask for a re-upload, rather than silently letting the
+        # financial calculator fall back to the member's self-declared amount and approve
+        # an unverifiable claim (PRD §4.3; assignment TC002).
+        for doc in docs:
+            if doc.get("system_error"):
+                continue
+            dtype = (doc.get("doc_type") or "").upper()
+            if not dtype.endswith("BILL"):
+                continue
+            content = doc.get("content") or {}
+            has_amounts = bool(content.get("line_items")) or content.get("total") is not None
+            if doc.get("readable") and not has_amounts:
+                ref = doc.get("file_name") or doc.get("file_id")
+                issues.append(
+                    f"The {dtype} ({ref}) could not be read clearly — no charges or bill "
+                    f"total could be extracted. Please re-upload a clearer photo of the bill."
                 )
 
         # 2. Required document types (claimed type counts as present even if unreadable).
@@ -72,7 +98,10 @@ class DocGate(Agent):
                     f"uploaded were: {uploaded_str}. Please upload a {req}."
                 )
 
-        # 3. Patient match — readable, named documents must all map to a covered person.
+        # 3. Patient match — every readable, named document must (a) name the SAME single
+        # patient and (b) that patient must be the member or a covered dependent. A claim
+        # whose prescription and bill name different people is a document-integrity failure
+        # (cross-document mismatch), even if both names happen to be covered.
         member = bb.get("member").value
         covered: set[str] = set()
         member_name = None
@@ -86,12 +115,18 @@ class DocGate(Agent):
             for doc in docs
             if doc.get("readable") and doc.get("patient_name")
         ]
-        mismatches = [(dt, nm) for dt, nm in named if _norm(nm) not in covered]
-        if mismatches and covered:
+        distinct = {_norm(nm) for _, nm in named}
+        if len(distinct) > 1:
             roster = "; ".join(f"the {dt} is for '{nm}'" for dt, nm in named)
             issues.append(
-                f"The documents appear to belong to different people: {roster}. "
-                f"They must all match the member '{member_name}' or a covered dependent."
+                f"The documents name different patients: {roster}. All documents for one "
+                f"claim must be for the same person (the member or a covered dependent)."
+            )
+        elif distinct and covered and not (distinct <= covered):
+            nm = next(nm for _, nm in named)
+            issues.append(
+                f"The documents are for '{nm}', who is not the member '{member_name}' or a "
+                f"covered dependent."
             )
 
         return Fact(

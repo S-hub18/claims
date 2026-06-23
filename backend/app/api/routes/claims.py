@@ -34,6 +34,8 @@ router = APIRouter(prefix="/claims", tags=["claims"])
 def _decimal_default(obj: Any) -> Any:
     if isinstance(obj, Decimal):
         return str(obj)
+    if isinstance(obj, bytes):
+        return f"<binary {len(obj)}b>"
     raise TypeError(f"Not serialisable: {type(obj)}")
 
 

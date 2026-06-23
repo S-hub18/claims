@@ -79,7 +79,17 @@ def test_covered_dependent_name_is_accepted_not_flagged():
             "claimed_amount": 1500,
             "documents": [
                 {"file_id": "A", "actual_type": "PRESCRIPTION", "patient_name_on_doc": "Arjun Kumar"},
-                {"file_id": "B", "actual_type": "HOSPITAL_BILL", "patient_name_on_doc": "Arjun Kumar"},
+                {
+                    "file_id": "B",
+                    "actual_type": "HOSPITAL_BILL",
+                    "patient_name_on_doc": "Arjun Kumar",
+                    # A real bill carries charges; without them the gate now (correctly)
+                    # blocks as an unreadable/unusable bill, so give it usable content.
+                    "content": {
+                        "line_items": [{"description": "Treatment Charges", "amount": 1500}],
+                        "total": 1500,
+                    },
+                },
             ],
         }
     )
