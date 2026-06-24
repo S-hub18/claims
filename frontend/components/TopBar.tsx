@@ -10,7 +10,7 @@ const TABS: { id: View; label: string }[] = [
 ];
 
 export function TopBar({ engine }: EngineProps) {
-  const { state, setView, toggleDev } = engine;
+  const { state, setView } = engine;
   return (
     <div className="topbar">
       <div className="brand">
@@ -35,17 +35,6 @@ export function TopBar({ engine }: EngineProps) {
         ))}
       </div>
 
-      <div className="dev-switch">
-        <span>Developer mode</span>
-        <button
-          className={`toggle${state.dev ? " on" : ""}`}
-          aria-label="Toggle developer mode"
-          aria-pressed={state.dev}
-          onClick={toggleDev}
-        >
-          <span className="knob" />
-        </button>
-      </div>
     </div>
   );
 }

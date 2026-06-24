@@ -5,7 +5,7 @@ import { StatusPill } from "./ui";
 import { fmt } from "@/lib/format";
 
 export function ResultPanel({ engine }: EngineProps) {
-  const { state, rerun, resubmit, toggleTrace } = engine;
+  const { state, rerun, resubmit } = engine;
   const dec = state.decision;
   if (!dec) return null;
 
@@ -191,34 +191,7 @@ export function ResultPanel({ engine }: EngineProps) {
           <button className="btn btn-secondary" onClick={rerun}>
             Run again
           </button>
-          <button className="btn btn-text" onClick={toggleTrace}>
-            {state.traceOpen ? "Hide trace" : "View full trace"}
-          </button>
         </div>
-
-        {state.traceOpen && (
-          <div className="trace">
-            <div className="section-label" style={{ color: "var(--primary)", marginBottom: 10 }}>
-              Trace · {state.facts.length} facts · sorted by seq
-            </div>
-            {state.facts.map((f) => (
-              <div key={f.seq} className="trace-row">
-                <span className="mono" style={{ fontSize: 10, color: "var(--on-ink-soft)" }}>
-                  {f.seq}
-                </span>
-                <span className="col">
-                  <span className="mono" style={{ fontSize: 11, color: "var(--on-ink)" }}>{f.key}</span>
-                  <span style={{ fontSize: 10, color: "var(--on-ink-soft)" }}>
-                    {f.author} · {f.reason || "derived"}
-                  </span>
-                </span>
-                <span className="mono" style={{ fontSize: 10, color: "var(--primary)", whiteSpace: "nowrap" }}>
-                  {f.conf != null ? f.conf.toFixed(2) : "—"}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* side summary */}
