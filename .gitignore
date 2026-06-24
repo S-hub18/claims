@@ -18,5 +18,4 @@ venv/
 
 # Test scaffolding / local artifacts (not part of the backend)
 backend/app/api/test_ui.html
-backend/assignment
 test_documents/

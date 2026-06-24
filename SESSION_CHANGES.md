@@ -17,6 +17,20 @@ graph, editable policy, authentic fraud signals, cleanup). Newest first.
 
 ## What changed, by area
 
+### Fix: commit the backend's default policy so a fresh clone boots
+- A clean-clone deploy test revealed the backend wouldn't start:
+  `FileNotFoundError: backend/assignment/policy_terms.json`. The engine resolves its
+  default policy to `<backend>/assignment/policy_terms.json` (config.py `REPO_ROOT` =
+  the `backend/` dir), and that file existed locally but was **untracked** — so it was
+  never pushed, and deleting untracked files would have broken the local backend too.
+  (The repo-root `assignment/policy_terms.json` is byte-identical but isn't the path the
+  code loads.) Fix: commit `backend/assignment/policy_terms.json`, keeping the backend
+  self-contained (boots whether a deploy ships the whole repo or just `backend/`).
+- Verified on a fresh `git clone` of origin/main (no untracked files): `uv sync` +
+  `npm ci` + `next build` succeed; backend boots (200); frontend prod server serves;
+  full Playwright sweep 15/15 incl. real-LLM separate-docs + combined-PDF uploads;
+  clean consultation → APPROVED ₹1,350.
+
 ### Fix: editable/uploaded policy 500 (uncommitted)
 - Bug found during full Playwright sweep: submitting with a `policy_override` (every
   edited-policy or uploaded-`.json` custom run) crashed the POST with
