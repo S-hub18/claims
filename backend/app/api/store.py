@@ -45,6 +45,12 @@ class ClaimStore:
         self._records: dict[str, ClaimRecord] = {}
         self._redis = redis_client
         self._session_factory = session_factory
+        # Real-time velocity ledger: member_id → prior submitted claims [{date, amount}].
+        # Built up from actual submissions (not seeded), so repeated claims for the same
+        # claimant accumulate and trip the velocity rule on their own. Only used for
+        # off-roster (custom) claimants — see submit_claim — so the seeded demo cases stay
+        # deterministic and never leak across eval re-runs.
+        self._ledger: dict[str, list[dict[str, Any]]] = {}
 
     # ── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -52,6 +58,16 @@ class ClaimStore:
         rec = ClaimRecord(claim_id=claim_id)
         self._records[claim_id] = rec
         return rec
+
+    # ── velocity ledger ────────────────────────────────────────────────────────
+
+    def ledger_history(self, member_id: str) -> list[dict[str, Any]]:
+        """Prior submitted claims for a member (real-time velocity input)."""
+        return list(self._ledger.get(member_id, []))
+
+    def record_in_ledger(self, member_id: str, date: str | None, amount: float | None) -> None:
+        """Record one submitted claim so the next one for this member sees it."""
+        self._ledger.setdefault(member_id, []).append({"date": date, "amount": amount})
 
     def get(self, claim_id: str) -> ClaimRecord | None:
         return self._records.get(claim_id)

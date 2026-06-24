@@ -176,6 +176,27 @@ export function CustomView({ engine }: EngineProps) {
             </div>
           </div>
 
+          <div
+            className="row between center"
+            style={{ marginTop: 18, padding: "12px 14px", background: "var(--canvas-soft)", border: "1px solid var(--hairline)", borderRadius: 10, gap: 12 }}
+          >
+            <div className="col" style={{ gap: 2, minWidth: 0 }}>
+              <span style={{ fontWeight: 600, fontSize: 13, color: "var(--ink)" }}>Simulate a component failure</span>
+              <span style={{ fontSize: 12, lineHeight: 1.45, color: "var(--muted-soft)" }}>
+                Crashes one agent mid-run to show graceful degradation — the claim still decides, confidence drops, and it’s flagged for manual review.
+              </span>
+            </div>
+            <button
+              className={`toggle${state.custSimulateFailure ? " on" : ""}`}
+              aria-pressed={state.custSimulateFailure}
+              aria-label="Simulate a component failure"
+              onClick={() => patch({ custSimulateFailure: !state.custSimulateFailure })}
+              style={{ flex: "0 0 auto" }}
+            >
+              <span className="knob" />
+            </button>
+          </div>
+
           {state.apiError && (
             <div
               className="row"

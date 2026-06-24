@@ -6,6 +6,14 @@ import type { Employee, EmployeeDocument } from "./db";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// One random token per page load — sent with every claim so the backend's velocity
+// ledger is sandboxed per browser session. Concurrent evaluators never share history;
+// a fresh tab/reload starts clean.
+const CLIENT_SESSION = (() => {
+  const c = globalThis.crypto;
+  return c && typeof c.randomUUID === "function" ? c.randomUUID() : Math.random().toString(36).slice(2);
+})();
+
 // Backend claim categories (lowercase) ↔ display labels.
 export const CATEGORY_OPTIONS: { value: string; label: string }[] = [
   { value: "consultation", label: "Consultation" },
@@ -245,6 +253,9 @@ export interface CustomClaimForm {
   // Optional uploaded policy JSON. When provided it adjudicates this claim;
   // otherwise the backend's default policy is used as the backup.
   policyOverride?: Record<string, unknown> | null;
+  // Inject a (simulated) component failure so the document-fraud agent crashes mid-run,
+  // letting you watch the pipeline degrade gracefully and recommend manual review.
+  simulateFailure?: boolean;
 }
 
 // Required document types per category — mirrors the policy's document_requirements.
@@ -328,6 +339,7 @@ export async function runCustomClaim(form: CustomClaimForm): Promise<RunResult> 
     treatment_date: form.treatmentDate,
     claimed_amount: form.amount,
     hospital_name: (form.hospital ?? "").trim(),
+    client_session: CLIENT_SESSION,
     // Real uploads → send the bytes for Claude to read; else synthesize from fields.
     documents:
       form.uploads && form.uploads.length
@@ -340,6 +352,7 @@ export async function runCustomClaim(form: CustomClaimForm): Promise<RunResult> 
         : synthesizeDocuments(form),
   };
   if (form.policyOverride) body.policy_override = form.policyOverride;
+  if (form.simulateFailure) body.simulate_component_failure = true;
   const claimId = await submitClaim(body);
   const backend = await pollClaim(claimId);
   return {

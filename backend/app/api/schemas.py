@@ -28,6 +28,9 @@ class ClaimSubmission(BaseModel):
     treatment_date: str
     claimed_amount: float
     hospital_name: str | None = None
+    # Per-browser token. The velocity ledger is keyed by (client_session, member_id) so
+    # concurrent evaluators on a shared deployment never see each other's claim history.
+    client_session: str | None = None
     ytd_claims_amount: float | None = None
     claims_history: list[dict[str, Any]] = Field(default_factory=list)
     simulate_component_failure: bool = False

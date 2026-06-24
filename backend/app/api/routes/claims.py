@@ -133,9 +133,22 @@ async def submit_claim(
     policy: Policy = _resolve_policy(body.policy_override, request.app.state.policy)
     claim_id = str(uuid.uuid4())
     store.create(claim_id)
-    background_tasks.add_task(
-        _adjudicate_bg, claim_id, body.to_engine_dict(), store, policy, settings
-    )
+
+    submission = body.to_engine_dict()
+    # Real-time velocity: for a claimant NOT on the policy roster (the custom flow), feed
+    # the member's previously-submitted claims as history and record this one, so repeated
+    # submissions for the same member accumulate and trip the velocity rule on their own.
+    # Roster members (the seeded demo cases) are left alone and stay deterministic.
+    roster = {(m.get("member_id") or "") for m in (policy.get("members") or [])}
+    if body.member_id and body.member_id not in roster:
+        # Sandbox the ledger per browser session so concurrent evaluators are isolated.
+        ledger_key = f"{body.client_session or 'anon'}:{body.member_id}"
+        prior = store.ledger_history(ledger_key)
+        if prior:
+            submission["claims_history"] = [*prior, *submission.get("claims_history", [])]
+        store.record_in_ledger(ledger_key, body.treatment_date, body.claimed_amount)
+
+    background_tasks.add_task(_adjudicate_bg, claim_id, submission, store, policy, settings)
     return SubmitResponse(claim_id=claim_id)
 
 

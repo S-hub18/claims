@@ -55,6 +55,7 @@ export interface EngineState {
   custDiagnosis: string;
   custAmount: number;
   custHospital: string;
+  custSimulateFailure: boolean;
   // policy + dev config
   policy: Policy | null;
   policyUploaded: boolean;
@@ -111,6 +112,7 @@ const INITIAL: EngineState = {
   custDiagnosis: "",
   custAmount: 4500,
   custHospital: "Apollo Hospitals",
+  custSimulateFailure: false,
   policy: null,
   policyUploaded: false,
   policyError: null,
@@ -409,6 +411,7 @@ export function useClaimEngine() {
         treatmentDate: s.custDate,
         amount: s.custAmount,
         hospital,
+        simulateFailure: s.custSimulateFailure,
         // Real uploaded documents drive the claim when present (Claude reads them).
         uploads: s.custUploads?.length ? s.custUploads : undefined,
         // Only override when the user actually uploaded a policy — otherwise the
@@ -447,6 +450,7 @@ export function useClaimEngine() {
     s.custDiagnosis,
     s.custAmount,
     s.custHospital,
+    s.custSimulateFailure,
     s.custUploads,
     s.policy,
     s.policyUploaded,
