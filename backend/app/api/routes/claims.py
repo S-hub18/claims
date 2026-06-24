@@ -70,6 +70,63 @@ def _decision_to_dict(claim_id: str, decision: Decision) -> dict[str, Any]:
     }
 
 
+def _segment_to_doc(res: Any, base_name: str) -> dict[str, Any]:
+    """Turn one segmented ExtractionResult into a submission document carrying inline
+    content, so the offline content-lift extractor consumes it without re-calling the LLM."""
+    raw = res.raw or {}
+    span = ""
+    if raw.get("page_start") is not None:
+        ps, pe = raw.get("page_start"), raw.get("page_end")
+        span = f" · p{ps}" + (f"-{pe}" if pe and pe != ps else "")
+    return {
+        "file_id": res.file_id,
+        "file_name": f"{base_name} — {res.doc_type or 'document'}{span}",
+        "actual_type": res.doc_type,
+        "quality": res.quality,
+        "content": {
+            "patient_name": res.patient_name,
+            "doctor_name": res.doctor_name,
+            "doctor_registration": res.doctor_registration,
+            "hospital_name": res.hospital_name,
+            "date": res.date,
+            "diagnosis": res.diagnosis,
+            "treatment": res.treatment,
+            "medicines": res.medicines,
+            "tests_ordered": res.tests_ordered,
+            "line_items": res.line_items,
+            "total": res.total_amount,
+        },
+    }
+
+
+async def _expand_combined_pdfs(
+    submission: dict[str, Any], llm_client: Any
+) -> dict[str, Any]:
+    """Replace each uploaded PDF with its constituent documents (one combined PDF may hold
+    a prescription + bill + lab report). A single-document PDF expands to one entry. No-op
+    when the client can't segment, or for inline-content (demo/test) documents."""
+    if llm_client is None or not hasattr(llm_client, "segment"):
+        return submission
+    out: list[dict[str, Any]] = []
+    changed = False
+    for d in submission.get("documents", []):
+        is_pdf = (d.get("mime_type") or "").lower() == "application/pdf"
+        if d.get("data") and not d.get("content") and is_pdf:
+            try:
+                segments = await llm_client.segment(
+                    file_id=d["file_id"], data=d["data"], mime_type="application/pdf"
+                )
+            except Exception:
+                segments = None
+            if segments:
+                base = d.get("file_name") or d["file_id"]
+                out.extend(_segment_to_doc(s, base) for s in segments)
+                changed = True
+                continue
+        out.append(d)
+    return {**submission, "documents": out} if changed else submission
+
+
 async def _adjudicate_bg(
     claim_id: str,
     submission_dict: dict[str, Any],
@@ -93,6 +150,9 @@ async def _adjudicate_bg(
                 llm_client = GeminiClient(api_key=settings.gemini_api_key)
         except Exception:
             llm_client = None
+        # Split any combined PDF (multiple documents in one file) into its constituent
+        # documents before adjudication, so each is gated/priced as its own document.
+        submission_dict = await _expand_combined_pdfs(submission_dict, llm_client)
         decision = await run_claim(
             submission_dict,
             policy,
@@ -139,7 +199,7 @@ async def submit_claim(
     # the member's previously-submitted claims as history and record this one, so repeated
     # submissions for the same member accumulate and trip the velocity rule on their own.
     # Roster members (the seeded demo cases) are left alone and stay deterministic.
-    roster = {(m.get("member_id") or "") for m in (policy.get("members") or [])}
+    roster = {(m.get("member_id") or "") for m in policy.members()}
     if body.member_id and body.member_id not in roster:
         # Sandbox the ledger per browser session so concurrent evaluators are isolated.
         ledger_key = f"{body.client_session or 'anon'}:{body.member_id}"
