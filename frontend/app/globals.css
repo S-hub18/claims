@@ -653,6 +653,77 @@ a {
     transform: none;
   }
 }
+/* graph node — a card in the fork–join flow */
+.tl-graph-node {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  animation: tlIn 0.4s cubic-bezier(0.2, 1, 0.3, 1) both;
+}
+/* short-circuited (skipped) agents — grouped, never ran */
+.skip-band {
+  background: var(--canvas-soft);
+  border: 1px dashed var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 11px 14px;
+  animation: tlIn 0.4s cubic-bezier(0.2, 1, 0.3, 1) both;
+}
+.skip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+}
+.wave-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.wave-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.11);
+  z-index: 5;
+}
+/* fork lines — animated dashes traveling from a junction out to the parallel agents */
+.flow-line {
+  stroke: var(--primary);
+  stroke-dasharray: 4 7;
+  opacity: 0.65;
+  animation: flowDash 0.9s linear infinite;
+}
+@keyframes flowDash {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+.jdot {
+  fill: var(--primary);
+  animation: jPulse 1.7s ease-in-out infinite;
+}
+@keyframes jPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-line,
+  .jdot {
+    animation: none;
+  }
+}
 .stat-card {
   flex: 1;
   min-width: 150px;

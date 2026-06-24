@@ -7,7 +7,7 @@ import { DocPreview } from "./DocPreview";
 import { fmt, iconFor } from "@/lib/format";
 import { CATEGORY_OPTIONS } from "@/lib/api";
 import type { EmployeeDocument } from "@/lib/db";
-import type { Status, TraceFact } from "@/lib/types";
+import type { Decision, Status, TraceFact } from "@/lib/types";
 
 // ── fact → plain English ──────────────────────────────────────────────────────
 // The lifecycle view replays the engine's own trace. Every agent posts a fact; this
@@ -261,6 +261,7 @@ export function EvalView({ engine }: EngineProps) {
   const { state, patch, selectedEmployee, selectEmployee, uploadDoc, removeDoc, runEval } = engine;
   const emp = selectedEmployee();
   const [preview, setPreview] = useState<EmployeeDocument | null>(null);
+  const [lcView, setLcView] = useState<"graph" | "timeline">("graph");
 
   const dec = state.evalDecision;
   const facts = [...state.evalFacts].sort((a, b) => a.seq - b.seq);
@@ -474,34 +475,51 @@ export function EvalView({ engine }: EngineProps) {
             </div>
           )}
 
-          {/* lifecycle timeline */}
+          {/* lifecycle — graph (parallel DAG) or timeline */}
           <div className="card" style={{ padding: 20 }}>
-            <div className="row between center wrap" style={{ gap: 8, marginBottom: 14 }}>
+            <div className="row between center wrap" style={{ gap: 8, marginBottom: 12 }}>
               <div className="section-label" style={{ margin: 0 }}>Lifecycle · {facts.length} steps</div>
-              <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
-                bar = time spent · longest {Math.round(maxDelta)}ms
-              </span>
-            </div>
-            <div className="tl">
-              {steps.map(({ f, step, tMs, delta }, i) => (
-                <TimelineRow key={f.seq} fact={f} step={step} tMs={tMs} delta={delta} maxDelta={maxDelta} index={i} />
-              ))}
-              {/* final decision node */}
-              <div className="tl-row" style={{ animationDelay: `${steps.length * 28}ms` }}>
-                <span className="tl-node" style={{ background: STATUS_COLORS[dec.status as Status], fontSize: 14 }}>✓</span>
-                <div className="row center wrap" style={{ gap: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>Decision · {statusLabel(dec.status as Status)}</span>
-                  <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>end-to-end {state.evalElapsed.toFixed(2)}s</span>
-                </div>
-                <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--body)", marginTop: 3 }}>
-                  {dec.reasons.length
-                    ? `Ranked reason: ${dec.reasons.join(", ")}.`
-                    : dec.status === "APPROVED"
-                      ? `All checks passed — ${fmt(dec.approved)} approved.`
-                      : dec.message || "Aggregated from the facts above."}
-                </div>
+              <div className="row center" style={{ gap: 6 }}>
+                <ToggleBtn active={lcView === "graph"} onClick={() => setLcView("graph")}>⊞ Graph</ToggleBtn>
+                <ToggleBtn active={lcView === "timeline"} onClick={() => setLcView("timeline")}>≣ Timeline</ToggleBtn>
               </div>
             </div>
+
+            {lcView === "graph" ? (
+              <>
+                <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--muted)", marginBottom: 14 }}>
+                  The engine runs in <strong style={{ color: "var(--body)" }}>waves</strong>: it fires every agent whose inputs
+                  are ready, all at once. Each band below is one wave — the agents inside it ran <strong style={{ color: "var(--body)" }}>in
+                  parallel</strong> — and the waves flow down to the final decision.
+                </div>
+                <LifecycleGraph steps={steps} dec={dec} elapsed={state.evalElapsed} />
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+                  Execution order with per-step timing — bar = time spent · longest {Math.round(maxDelta)}ms.
+                </div>
+                <div className="tl">
+                  {steps.map(({ f, step, tMs, delta }, i) => (
+                    <TimelineRow key={f.seq} fact={f} step={step} tMs={tMs} delta={delta} maxDelta={maxDelta} index={i} />
+                  ))}
+                  <div className="tl-row" style={{ animationDelay: `${steps.length * 28}ms` }}>
+                    <span className="tl-node" style={{ background: STATUS_COLORS[dec.status as Status], fontSize: 14 }}>✓</span>
+                    <div className="row center wrap" style={{ gap: 8 }}>
+                      <span style={{ fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>Decision · {statusLabel(dec.status as Status)}</span>
+                      <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>end-to-end {state.evalElapsed.toFixed(2)}s</span>
+                    </div>
+                    <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--body)", marginTop: 3 }}>
+                      {dec.reasons.length
+                        ? `Ranked reason: ${dec.reasons.join(", ")}.`
+                        : dec.status === "APPROVED"
+                          ? `All checks passed — ${fmt(dec.approved)} approved.`
+                          : dec.message || "Aggregated from the facts above."}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -593,6 +611,263 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="col" style={{ alignItems: "center", gap: 2 }}>
       <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)" }}>{value}</span>
       <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--muted)" }}>{label}</span>
+    </div>
+  );
+}
+
+function ToggleBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="pill mono"
+      style={{
+        cursor: "pointer",
+        padding: "6px 12px",
+        fontSize: 12,
+        fontWeight: 600,
+        border: `1px solid ${active ? "var(--primary)" : "var(--hairline)"}`,
+        background: active ? "var(--primary-tint)" : "var(--surface-card)",
+        color: active ? "var(--primary)" : "var(--muted)",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── dependency-graph layout ───────────────────────────────────────────────────
+// Build a layered DAG from each fact's recorded lineage (derived_from = the keys the
+// posting agent read). Nodes sharing a level had all their inputs ready at the same
+// time → they ran in parallel. The gate also provably consumes every extraction, so
+// we add that implicit edge. Leaves (nothing depends on them) flow into the decision.
+
+type GStep = { f: TraceFact; step: Step; tMs: number; delta: number };
+
+// Group steps into execution "waves" by dependency depth: a step's wave is one past
+// the deepest fact it read (derived_from). Everything in the same wave had its inputs
+// ready at the same moment, so it ran in parallel. The gate also provably consumes
+// every extraction, so that implicit edge is added.
+function buildWaves(steps: GStep[]): GStep[][] {
+  const keys = new Set(steps.map((s) => s.f.key));
+  const extractionKeys = steps.filter((s) => s.f.key.startsWith("extraction.")).map((s) => s.f.key);
+
+  const depsOf = (s: GStep): string[] => {
+    let d = (s.f.derivedFrom ?? []).filter((k) => keys.has(k) && k !== s.f.key);
+    if (s.f.key === "gate") d = Array.from(new Set([...d, ...extractionKeys]));
+    return d;
+  };
+
+  const level = new Map<string, number>();
+  for (const s of steps) {
+    const ds = depsOf(s);
+    level.set(s.f.key, ds.length ? Math.max(...ds.map((k) => level.get(k) ?? 0)) + 1 : 0);
+  }
+
+  const byLevel: GStep[][] = [];
+  for (const s of steps) {
+    const l = level.get(s.f.key) ?? 0;
+    (byLevel[l] ||= []).push(s);
+  }
+  return byLevel.filter((w) => w && w.length > 0);
+}
+
+// fork–join flow diagram geometry
+const CARD_W = 168;
+const CARD_H = 82;
+const GAP_X = 16;
+const ROW_GAP = 62;
+const GUTTER = 96;
+const TOP = 4;
+const DEC_W = 300;
+
+type Seg = { x1: number; y1: number; x2: number; y2: number };
+type Rank = { kind: "wave"; cards: GStep[] } | { kind: "skipped"; cards: GStep[] } | { kind: "decision" };
+const CHIP_W = 152;
+const CHIP_H = 26;
+const CHIP_GAP = 8;
+
+function LifecycleGraph({ steps, dec, elapsed }: { steps: GStep[]; dec: Decision; elapsed: number }) {
+  // Skipped agents never ran, and their inputs were never posted — so they can't be
+  // placed in the dependency waves (they'd orphan to level 0). Pull them out and show
+  // them as one "short-circuited" band after the gate, where they were actually pruned.
+  const ran = steps.filter((s) => !s.f.key.startsWith("skipped."));
+  const skipped = steps.filter((s) => s.f.key.startsWith("skipped."));
+  const waves = buildWaves(ran);
+  const parallel = waves.filter((w) => w.length > 1).length;
+
+  const maxCards = Math.max(1, ...waves.map((w) => w.length));
+  const contentW = Math.max(maxCards * (CARD_W + GAP_X) - GAP_X, DEC_W);
+  const width = GUTTER + contentW;
+  const cx = GUTTER + contentW / 2;
+
+  const ranks: Rank[] = [
+    ...waves.map((w): Rank => ({ kind: "wave", cards: w })),
+    ...(skipped.length ? [{ kind: "skipped", cards: skipped } as Rank] : []),
+    { kind: "decision" } as Rank,
+  ];
+
+  // skipped band: fixed-width chips wrap inside a full-width dashed box
+  const perRow = Math.max(1, Math.floor((contentW + CHIP_GAP) / (CHIP_W + CHIP_GAP)));
+  const skipRows = skipped.length ? Math.ceil(skipped.length / perRow) : 0;
+  const skipBandH = 30 + skipRows * (CHIP_H + CHIP_GAP) + 8;
+  const rankH = (rk: Rank) => (rk.kind === "skipped" ? skipBandH : CARD_H);
+
+  const tops: number[] = [];
+  let yy = TOP;
+  ranks.forEach((rk, r) => {
+    tops[r] = yy;
+    yy += rankH(rk) + ROW_GAP;
+  });
+  const height = yy - ROW_GAP + 4;
+
+  const cardLeft = (count: number, j: number) => GUTTER + (contentW - (count * (CARD_W + GAP_X) - GAP_X)) / 2 + j * (CARD_W + GAP_X);
+  const decLeft = GUTTER + (contentW - DEC_W) / 2;
+
+  const anchorsOf = (rk: Rank): number[] =>
+    rk.kind === "wave" ? rk.cards.map((_s, j) => cardLeft(rk.cards.length, j) + CARD_W / 2) : [cx];
+
+  const joins: Seg[] = [];
+  const forks: Seg[] = [];
+  const junctions: { x: number; y: number }[] = [];
+  for (let r = 0; r < ranks.length - 1; r++) {
+    const jy = tops[r] + rankH(ranks[r]) + ROW_GAP / 2;
+    junctions.push({ x: cx, y: jy });
+    anchorsOf(ranks[r]).forEach((ax) => joins.push({ x1: ax, y1: tops[r] + rankH(ranks[r]), x2: cx, y2: jy }));
+    anchorsOf(ranks[r + 1]).forEach((ax) => forks.push({ x1: cx, y1: jy, x2: ax, y2: tops[r + 1] }));
+  }
+
+  const curve = (l: Seg) => {
+    const my = (l.y1 + l.y2) / 2;
+    return `M${l.x1},${l.y1} C${l.x1},${my} ${l.x2},${my} ${l.x2},${l.y2}`;
+  };
+
+  let n = 0;
+  return (
+    <div>
+      <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+        <div style={{ position: "relative", width, height, minWidth: "100%", margin: "0 auto" }}>
+          <svg width={width} height={height} style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "visible" }}>
+            {joins.map((l, i) => (
+              <path key={`j${i}`} d={curve(l)} fill="none" stroke="var(--hairline)" strokeWidth={1.5} />
+            ))}
+            {forks.map((l, i) => (
+              <path key={`f${i}`} className="flow-line" d={curve(l)} fill="none" strokeWidth={2} />
+            ))}
+            {junctions.map((p, i) => (
+              <circle key={`d${i}`} className="jdot" cx={p.x} cy={p.y} r={4.5} />
+            ))}
+          </svg>
+
+          {ranks.map((rk, r) => {
+            if (rk.kind === "wave") {
+              return (
+                <div key={r}>
+                  <RailLabel top={tops[r]} title={`WAVE ${r + 1}`} badge={rk.cards.length > 1 ? `⇉ ${rk.cards.length}×` : "1"} parallel={rk.cards.length > 1} />
+                  {rk.cards.map((s, j) => (
+                    <WaveCard key={s.f.seq} s={s} left={cardLeft(rk.cards.length, j)} top={tops[r]} index={n++} />
+                  ))}
+                </div>
+              );
+            }
+            if (rk.kind === "skipped") {
+              return (
+                <div key={r}>
+                  <RailLabel top={tops[r]} title="PRUNED" badge={`⏭ ${rk.cards.length}`} parallel={false} muted />
+                  <div className="skip-band" style={{ position: "absolute", left: GUTTER, top: tops[r], width: contentW, minHeight: skipBandH }}>
+                    <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+                      ⏭ {rk.cards.length} agents short-circuited — the gate blocked the claim, so these never ran
+                    </div>
+                    <div className="row wrap" style={{ gap: CHIP_GAP }}>
+                      {rk.cards.map((s) => (
+                        <span key={s.f.seq} className="skip-chip" title={s.step.detail} style={{ width: CHIP_W }}>
+                          <span className="mono" style={{ fontSize: 9, fontWeight: 700, background: "var(--muted)", color: "#fff", borderRadius: 3, padding: "0 4px", flex: "0 0 auto" }}>
+                            {PHASE_CODE[s.step.phase] ?? "•"}
+                          </span>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.f.key.replace("skipped.", "")}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div
+                key={r}
+                className="wave-card tl-graph-node"
+                style={{ position: "absolute", left: decLeft, top: tops[r], width: DEC_W, minHeight: CARD_H, background: STATUS_COLORS[dec.status as Status], border: "none", color: "#fff", justifyContent: "center", animationDelay: `${n * 18}ms` }}
+                title={dec.message || ""}
+              >
+                <div className="row center wrap" style={{ gap: 9 }}>
+                  <span style={{ fontSize: 15 }}>✓</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: ".02em" }}>DECISION · {statusLabel(dec.status as Status)}</span>
+                </div>
+                <span className="mono" style={{ fontSize: 10, opacity: 0.85 }}>{elapsed.toFixed(2)}s end-to-end · {steps.length} agents</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="mono" style={{ fontSize: 11, color: "var(--muted)", marginTop: 12 }}>
+        {ran.length} ran · {waves.length} waves · {parallel} parallel{skipped.length ? ` · ${skipped.length} short-circuited` : ""} · animated lines = dispatch
+      </div>
+    </div>
+  );
+}
+
+function RailLabel({ top, title, badge, parallel, muted }: { top: number; title: string; badge: string; parallel: boolean; muted?: boolean }) {
+  return (
+    <div style={{ position: "absolute", left: 4, top: top + 6, width: GUTTER - 16, display: "flex", flexDirection: "column", gap: 4 }}>
+      <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: muted ? "var(--muted-soft)" : "var(--muted)", letterSpacing: ".05em" }}>{title}</span>
+      <span
+        className="pill"
+        style={{
+          fontSize: 9,
+          fontWeight: 700,
+          alignSelf: "flex-start",
+          padding: "2px 6px",
+          background: parallel ? "var(--primary-tint)" : "var(--canvas-soft)",
+          color: parallel ? "var(--primary)" : "var(--muted-soft)",
+        }}
+      >
+        {badge}
+      </span>
+    </div>
+  );
+}
+
+function WaveCard({ s, left, top, index }: { s: GStep; left: number; top: number; index: number }) {
+  const color = TONE_COLOR[s.step.tone];
+  return (
+    <div
+      className="wave-card tl-graph-node"
+      title={s.step.detail}
+      style={{ position: "absolute", left, top, width: CARD_W, minHeight: CARD_H, borderTop: `3px solid ${color}`, animationDelay: `${index * 18}ms` }}
+    >
+      <div className="row center" style={{ gap: 6 }}>
+        <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: "#fff", background: color, borderRadius: 4, padding: "1px 5px" }}>
+          {PHASE_CODE[s.step.phase] ?? "•"}
+        </span>
+        <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{s.step.phase}</span>
+        <span className="mono" style={{ fontSize: 9, color: s.delta > 100 ? "var(--st-partial)" : "var(--muted-soft)", marginLeft: "auto" }}>
+          +{s.delta < 1 ? "<1" : Math.round(s.delta)}ms
+        </span>
+      </div>
+      <div
+        style={{
+          fontWeight: 600,
+          fontSize: 12.5,
+          lineHeight: 1.3,
+          color: "var(--ink)",
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+        }}
+      >
+        {s.step.title}
+      </div>
+      <span className="mono" style={{ fontSize: 10, color, fontWeight: 700 }}>{TONE_VERDICT[s.step.tone]}</span>
     </div>
   );
 }
