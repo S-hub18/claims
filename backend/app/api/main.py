@@ -73,7 +73,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
+    # Explicit origins (configured frontend + local dev) plus a regex that matches
+    # every Vercel deployment of this project — production alias and per-commit
+    # preview URLs alike — so a new Vercel URL never breaks CORS again.
     allow_origins=[get_settings().frontend_url, "http://localhost:3000"],
+    allow_origin_regex=r"https://claims[a-z0-9-]*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
