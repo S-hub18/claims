@@ -99,7 +99,12 @@ class FinancialCalculator(GateGatedAgent):
             gross = _d(submission.get("claimed_amount"))
 
         # Step 1: network discount FIRST.
-        hospital = submission.get("hospital_name") or _bill_hospital(bb)
+        # Top-level hospital_name is authoritative when the caller provides the
+        # key (even as ""), so clearing it in the UI drops the network discount.
+        # Fall back to the bill's hospital only when the field is entirely absent.
+        hospital = submission.get("hospital_name")
+        if hospital is None:
+            hospital = _bill_hospital(bb)
         discount_pct = (
             _d(cat.get("network_discount_percent", 0))
             if self.policy.is_network_hospital(hospital)

@@ -63,7 +63,10 @@ class ClaimSubmission(BaseModel):
             "claimed_amount": self.claimed_amount,
             "documents": docs,
         }
-        if self.hospital_name:
+        # Pass through whenever explicitly provided — including "" — so a cleared
+        # hospital field stays authoritative (no network discount) instead of
+        # being dropped and falling back to the bill's hospital downstream.
+        if self.hospital_name is not None:
             result["hospital_name"] = self.hospital_name
         if self.ytd_claims_amount is not None:
             result["ytd_claims_amount"] = self.ytd_claims_amount
