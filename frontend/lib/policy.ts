@@ -43,6 +43,17 @@ export const DEFAULT_POLICY: Policy = {
     },
     alternative_medicine: { sub_limit: 8000, copay_percent: 0, max_sessions_per_year: 20 },
   },
+  // Mirrors policy_terms.json — keys are UPPERCASE because the backend resolves
+  // document_requirements.<CATEGORY>.required. Required so an edited policy is a
+  // valid override the backend accepts.
+  document_requirements: {
+    CONSULTATION: { required: ["PRESCRIPTION", "HOSPITAL_BILL"], optional: ["LAB_REPORT", "DIAGNOSTIC_REPORT"] },
+    DIAGNOSTIC: { required: ["PRESCRIPTION", "LAB_REPORT", "HOSPITAL_BILL"], optional: ["DISCHARGE_SUMMARY"] },
+    PHARMACY: { required: ["PRESCRIPTION", "PHARMACY_BILL"], optional: [] },
+    DENTAL: { required: ["HOSPITAL_BILL"], optional: ["PRESCRIPTION", "DENTAL_REPORT"] },
+    VISION: { required: ["PRESCRIPTION", "HOSPITAL_BILL"], optional: [] },
+    ALTERNATIVE_MEDICINE: { required: ["PRESCRIPTION", "HOSPITAL_BILL"], optional: [] },
+  },
   waiting_periods: { initial_waiting_period_days: 30, pre_existing_conditions_days: 365 },
   fraud_thresholds: {
     same_day_claims_limit: 2,

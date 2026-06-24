@@ -155,6 +155,9 @@ export interface Policy {
     per_claim_limit: number;
   };
   opd_categories: Record<string, PolicyCategory>;
+  // Required/optional document types per category (UPPERCASE keys, as the backend
+  // reads them). Present so an edited policy is accepted as a valid override.
+  document_requirements?: Record<string, { required: string[]; optional: string[] }>;
   waiting_periods: Record<string, number>;
   fraud_thresholds: {
     same_day_claims_limit: number;

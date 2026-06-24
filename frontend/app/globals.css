@@ -665,6 +665,79 @@ a {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   animation: tlIn 0.4s cubic-bezier(0.2, 1, 0.3, 1) both;
 }
+/* editable policy fields (dark policy panel) */
+.policy-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.policy-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+.policy-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.policy-stat > .lbl {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-ink-soft);
+}
+.policy-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--ink-surface);
+  border: 1px solid var(--ink-surface-2);
+  border-radius: 8px;
+  padding: 6px 9px;
+  transition: border-color 0.15s ease;
+}
+.policy-field:focus-within {
+  border-color: var(--primary);
+}
+.policy-field .affix {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-ink-soft);
+  flex: 0 0 auto;
+}
+.policy-field input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--primary);
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 13px;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+.policy-field input::-webkit-outer-spin-button,
+.policy-field input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.toggle.sm {
+  width: 34px;
+  height: 20px;
+}
+.toggle.sm .knob {
+  width: 14px;
+  height: 14px;
+}
+.toggle.sm.on .knob {
+  left: 17px;
+}
+
 /* short-circuited (skipped) agents — grouped, never ran */
 .skip-band {
   background: var(--canvas-soft);

@@ -525,6 +525,27 @@ export function useClaimEngine() {
       .catch(() => patch({ policyError: "Could not read " + file.name + "." }));
   };
 
+  // Edit any policy value inline by dotted path (custom view), e.g.
+  // "coverage.per_claim_limit" or "opd_categories.consultation.copay_percent". The
+  // modified policy becomes the override sent with the claim, so adjudication runs
+  // against it — no file upload needed. Based on the active policy (uploaded or default).
+  const setPolicyValue = useCallback(
+    (path: string, value: number | boolean) => {
+      patch((st) => {
+        const base = (st.policy ?? DEFAULT_POLICY) as unknown as Record<string, unknown>;
+        const keys = path.split(".");
+        const clone = (obj: Record<string, unknown>, i: number): Record<string, unknown> => {
+          const k = keys[i];
+          const copy = { ...obj };
+          copy[k] = i === keys.length - 1 ? value : clone((obj[k] as Record<string, unknown>) ?? {}, i + 1);
+          return copy;
+        };
+        return { policy: clone(base, 0) as unknown as Policy, policyUploaded: true, policyError: null };
+      });
+    },
+    [patch]
+  );
+
   // ── eval / lifecycle — run the SELECTED demo profile, keep the full trace ──────
   // Same claim flow as the demo view (same employee, documents, and form fields), but
   // we capture every fact the engine posts plus per-step timing, so a tester can watch
@@ -590,6 +611,7 @@ export function useClaimEngine() {
     onCustFiles,
     removeCustDoc,
     onPolicyFile,
+    setPolicyValue,
     runEval,
   };
 }
