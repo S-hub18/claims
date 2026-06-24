@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.schemas import ClaimSubmission, DecisionResponse, SubmitResponse
+from app.api.schemas import ClaimSubmission, DecisionResponse, FactEvent, SubmitResponse
 from app.api.store import ClaimStore
 from app.config import Settings, get_settings
 from app.decision import Decision
@@ -37,6 +37,24 @@ def _decimal_default(obj: Any) -> Any:
     if isinstance(obj, bytes):
         return f"<binary {len(obj)}b>"
     raise TypeError(f"Not serialisable: {type(obj)}")
+
+
+def _json_safe(obj: Any) -> Any:
+    """Strip values the HTTP layer can't encode out of a fact's value.
+
+    The ``submission`` fact carries the raw document bytes of any uploaded file, and
+    financial facts carry Decimals. Both must be made JSON-safe before a fact is sent
+    in DecisionResponse, otherwise the whole GET 500s (and the browser reports it as a
+    CORS error). Mirrors ``_decimal_default`` but recurses through the value tree."""
+    if isinstance(obj, bytes):
+        return f"<binary {len(obj)}b>"
+    if isinstance(obj, Decimal):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
 
 
 def _decision_to_dict(claim_id: str, decision: Decision) -> dict[str, Any]:
@@ -142,6 +160,11 @@ async def get_claim(claim_id: str, request: Request) -> DecisionResponse:
         notes=d.get("notes", []),
         confidence=d.get("confidence"),
         fact_count=len(record.facts),
+        # Replay the whole trace once the claim has settled — the lifecycle view reads
+        # this to render every step. Sanitise each value first: the submission fact
+        # holds uploaded-file bytes and financial facts hold Decimals, neither of which
+        # the JSON response can encode.
+        facts=[FactEvent(**{**f, "value": _json_safe(f.get("value"))}) for f in record.facts],
     )
 
 

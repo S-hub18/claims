@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmt, filesToObjs } from "./format";
 import { DEFAULT_POLICY } from "./policy";
-import { TEST_CASES } from "./testcases";
 import {
   fetchEmployees,
   fetchEmployeeDocuments,
@@ -22,11 +21,9 @@ import {
 import type {
   Decision,
   DocFile,
-  EvalResult,
   HistoryRow,
   Policy,
   Status,
-  TestCase,
   TraceFact,
   View,
 } from "./types";
@@ -76,15 +73,14 @@ export interface EngineState {
   lastSource: "demo" | "custom";
   // history
   history: HistoryRow[];
-  // eval
-  evalRunning: boolean;
-  evalResults: Record<string, EvalResult>;
-  evalStarted: boolean;
-  customEvals: TestCase[];
-  newEvalName: string;
-  newEvalDoc: string;
-  newEvalExp: Status;
-  evalFiles: DocFile[];
+  // eval / lifecycle — runs the SELECTED demo profile (same claim flow) but keeps the
+  // full trace + timing so a tester can validate every step the engine takes
+  evalBusy: boolean;
+  evalRan: boolean;
+  evalDecision: Decision | null;
+  evalFacts: TraceFact[];
+  evalElapsed: number;
+  evalError: string | null;
   // chrome
   toast: { status: Status; sub: string } | null;
   traceOpen: boolean;
@@ -130,14 +126,12 @@ const INITIAL: EngineState = {
   elapsed: 0,
   lastSource: "demo",
   history: [],
-  evalRunning: false,
-  evalResults: {},
-  evalStarted: false,
-  customEvals: [],
-  newEvalName: "",
-  newEvalDoc: "Prescription",
-  newEvalExp: "APPROVED",
-  evalFiles: [],
+  evalBusy: false,
+  evalRan: false,
+  evalDecision: null,
+  evalFacts: [],
+  evalElapsed: 0,
+  evalError: null,
   toast: null,
   traceOpen: false,
 };
@@ -531,50 +525,52 @@ export function useClaimEngine() {
       .catch(() => patch({ policyError: "Could not read " + file.name + "." }));
   };
 
-  // ── eval (client-side) ──────────────────────────────────────────────────────
-  const runAllEvals = useCallback(() => {
-    clearTimers();
-    const cases = [...TEST_CASES, ...s.customEvals];
-    const results: Record<string, EvalResult> = {};
-    cases.forEach((c) => (results[c.id] = { running: true }));
-    patch({ evalRunning: true, evalStarted: true, evalResults: results });
-    cases.forEach((c) => {
-      timers.current.push(
-        setTimeout(() => {
-          patch((st) => ({
-            evalResults: {
-              ...st.evalResults,
-              [c.id]: { done: true, actual: c.expected, pass: true, approved: c.approved, conf: c.conf, ms: c.ms, note: c.note },
-            },
-          }));
-        }, c.ms)
+  // ── eval / lifecycle — run the SELECTED demo profile, keep the full trace ──────
+  // Same claim flow as the demo view (same employee, documents, and form fields), but
+  // we capture every fact the engine posts plus per-step timing, so a tester can watch
+  // and validate each step instead of only seeing the final decision.
+  const runEval = useCallback(async () => {
+    if (s.evalBusy) return;
+    const emp = s.employees.find((e) => e.id === s.selectedEmployeeId);
+    if (!emp) return;
+    patch({ evalBusy: true, evalError: null, evalRan: false });
+    const t0 = performance.now();
+    try {
+      const { decision, facts } = await runBackendClaim(
+        emp,
+        s.employeeDocs,
+        {
+          category: s.treatment,
+          treatmentDate: s.date,
+          amount: s.amount,
+          hospital: s.hospital,
+          claimsHistory: emp.claims_history,
+          simulateFailure: emp.simulate_failure,
+        },
+        s.sessionUploads
       );
-    });
-    const maxMs = Math.max(...cases.map((c) => c.ms));
-    timers.current.push(setTimeout(() => patch({ evalRunning: false }), maxMs + 60));
-  }, [clearTimers, patch, s.customEvals]);
-
-  const addCustomEval = useCallback(() => {
-    const expApproved: Record<Status, number | null> = { APPROVED: 4500, PARTIAL: 25000, REJECTED: 0, MANUAL_REVIEW: 18000, BLOCKED: null };
-    const id = "TC" + String(13 + s.customEvals.length).padStart(3, "0");
-    const c: TestCase = {
-      id,
-      title: s.newEvalName || "My " + s.newEvalDoc.toLowerCase(),
-      cat: s.newEvalDoc,
-      expected: s.newEvalExp,
-      approved: expApproved[s.newEvalExp],
-      conf: s.newEvalExp === "BLOCKED" ? null : 0.9,
-      ms: 900 + ((s.customEvals.length * 137) % 900),
-      note: s.newEvalExp === "MANUAL_REVIEW" ? "Custom case — confidence below auto-approve floor." : null,
-      custom: true,
-    };
-    patch((st) => ({ customEvals: [...st.customEvals, c], newEvalName: "", evalFiles: [] }));
-  }, [patch, s.customEvals.length, s.newEvalName, s.newEvalDoc, s.newEvalExp]);
-
-  const onEvalFiles = (files: FileList | null) => {
-    const objs = filesToObjs(files);
-    if (objs.length) patch((st) => ({ evalFiles: [...st.evalFiles, ...objs] }));
-  };
+      patch({
+        evalBusy: false,
+        evalRan: true,
+        evalDecision: decision,
+        evalFacts: facts,
+        evalElapsed: (performance.now() - t0) / 1000,
+      });
+    } catch (e) {
+      patch({ evalBusy: false, evalError: (e as Error).message || String(e) });
+    }
+  }, [
+    s.evalBusy,
+    s.employees,
+    s.selectedEmployeeId,
+    s.employeeDocs,
+    s.treatment,
+    s.date,
+    s.amount,
+    s.hospital,
+    s.sessionUploads,
+    patch,
+  ]);
 
   return {
     state: s,
@@ -594,9 +590,7 @@ export function useClaimEngine() {
     onCustFiles,
     removeCustDoc,
     onPolicyFile,
-    runAllEvals,
-    addCustomEval,
-    onEvalFiles,
+    runEval,
   };
 }
 

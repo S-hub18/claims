@@ -81,6 +81,10 @@ class ClaimStore:
                 "degraded": fact.degraded,
                 "derived_from": list(fact.derived_from),
                 "reason": fact.reason,
+                # Cumulative ms from claim creation to when this fact landed — the
+                # lifecycle/tester view shows it so a developer can see how long each
+                # step took (e.g. LLM extraction vs an instant rule check).
+                "t_ms": round((time.time() - record.created_at) * 1000, 1),
             }
             record.facts.append(fact_dict)
             record.queue.put_nowait(fact_dict)

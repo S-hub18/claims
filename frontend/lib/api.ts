@@ -1,7 +1,7 @@
 "use client";
 
 import { confBand } from "./format";
-import type { Decision, Status } from "./types";
+import type { Decision, Status, TraceFact } from "./types";
 import type { Employee, EmployeeDocument } from "./db";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -41,6 +41,18 @@ export interface ClaimForm {
   simulateFailure?: boolean;
 }
 
+interface BackendFact {
+  seq: number;
+  key: string;
+  value: unknown;
+  author: string;
+  confidence?: number | null;
+  degraded?: boolean;
+  derived_from?: string[];
+  reason?: string | null;
+  t_ms?: number | null;
+}
+
 interface BackendDecision {
   claim_id: string;
   status: string;
@@ -50,6 +62,22 @@ interface BackendDecision {
   notes?: string[];
   confidence?: number | null;
   fact_count?: number;
+  facts?: BackendFact[];
+}
+
+/** Map the backend's snake_case fact events to the UI's TraceFact shape. */
+function toTraceFacts(raw: BackendFact[] | undefined): TraceFact[] {
+  return (raw ?? []).map((f) => ({
+    seq: f.seq,
+    key: f.key,
+    author: f.author,
+    conf: f.confidence ?? null,
+    degraded: f.degraded,
+    reason: f.reason ?? undefined,
+    value: f.value,
+    derivedFrom: f.derived_from ?? [],
+    tMs: f.t_ms ?? undefined,
+  }));
 }
 
 /** In-memory base64 for documents uploaded this session, keyed by file_id. */
@@ -171,6 +199,9 @@ export function mapDecision(
 export interface RunResult {
   decision: Decision;
   factCount: number;
+  // The full ordered blackboard trace for this run. The demo/custom views ignore it;
+  // the lifecycle/tester view renders it step by step. Empty if the backend is old.
+  facts: TraceFact[];
 }
 
 export async function runBackendClaim(
@@ -185,6 +216,7 @@ export async function runBackendClaim(
   return {
     decision: mapDecision(backend, form.amount, form.category),
     factCount: backend.fact_count ?? 0,
+    facts: toTraceFacts(backend.facts),
   };
 }
 
@@ -313,5 +345,6 @@ export async function runCustomClaim(form: CustomClaimForm): Promise<RunResult> 
   return {
     decision: mapDecision(backend, form.amount, categoryLabel(form.category)),
     factCount: backend.fact_count ?? 0,
+    facts: toTraceFacts(backend.facts),
   };
 }

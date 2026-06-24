@@ -81,6 +81,13 @@ export interface TraceFact {
   conf: number | null;
   degraded?: boolean;
   reason?: string;
+  // The agent's posted value (verdict object, extraction dict, …) and the fact keys
+  // it was derived from. The lifecycle/eval view reads these to render each step in
+  // plain English and surface every issue a check raised. ``tMs`` is the cumulative
+  // milliseconds from claim creation to when this step landed (per-step timing).
+  value?: unknown;
+  derivedFrom?: string[];
+  tMs?: number;
 }
 
 export interface RunPlan {

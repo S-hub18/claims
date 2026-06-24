@@ -97,6 +97,7 @@ class FactEvent(BaseModel):
     degraded: bool
     derived_from: list[str]
     reason: str | None
+    t_ms: float | None = None  # cumulative ms from claim creation to this step
 
 
 class DecisionResponse(BaseModel):
@@ -109,6 +110,11 @@ class DecisionResponse(BaseModel):
     confidence: float | None = None
     fact_count: int = 0
     preliminary_decision: str | None = None
+    # The full ordered blackboard trace — every fact each agent posted, with lineage
+    # and per-step verdicts. The demo/custom views ignore it; the eval/lifecycle view
+    # replays it to show exactly how the engine reasoned (every issue, not just the
+    # top-ranked one). Empty while still processing.
+    facts: list[FactEvent] = Field(default_factory=list)
 
 
 def fact_to_event(fact: Any) -> FactEvent:

@@ -578,6 +578,81 @@ a {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px;
 }
+/* ---- tester / lifecycle inspector ---- */
+/* compact run-config bar — deliberately unlike the demo's big sidebar + card */
+.tester-head {
+  background: var(--ink-surface);
+  border-radius: var(--r-lg);
+  padding: 16px 20px;
+  color: var(--on-ink);
+  margin-bottom: 16px;
+}
+.config-bar {
+  background: var(--canvas-soft);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 16px 18px;
+}
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+/* vertical timeline with a connecting rail + animated nodes */
+.tl {
+  position: relative;
+  margin-top: 6px;
+}
+.tl::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 10px;
+  bottom: 40px;
+  width: 2px;
+  background: var(--hairline);
+}
+.tl-row {
+  position: relative;
+  padding: 11px 0 13px 46px;
+  animation: tlIn 0.4s cubic-bezier(0.2, 1, 0.3, 1) both;
+}
+.tl-node {
+  position: absolute;
+  left: 1px;
+  top: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  color: #fff;
+  box-shadow: 0 0 0 4px var(--surface-card);
+}
+.tl-bar-track {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--hairline-soft);
+  margin-top: 8px;
+  max-width: 340px;
+  overflow: hidden;
+}
+.tl-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+@keyframes tlIn {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 .stat-card {
   flex: 1;
   min-width: 150px;
