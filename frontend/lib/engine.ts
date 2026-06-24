@@ -416,7 +416,7 @@ export function useClaimEngine() {
         amount: s.custAmount,
         hospital,
         // Real uploaded documents drive the claim when present (Claude reads them).
-        uploads: s.custUploads.length ? s.custUploads : undefined,
+        uploads: s.custUploads?.length ? s.custUploads : undefined,
         // Only override when the user actually uploaded a policy — otherwise the
         // backend falls back to its default policy as the backup.
         policyOverride: s.policyUploaded
@@ -504,16 +504,16 @@ export function useClaimEngine() {
           mime: f.type || "application/octet-stream",
         }));
         patch((st) => ({
-          custDocs: [...st.custDocs, ...display],
-          custUploads: [...st.custUploads, ...uploads],
+          custDocs: [...(st.custDocs || []), ...display],
+          custUploads: [...(st.custUploads || []), ...uploads],
         }));
       })
       .catch((e) => patch({ apiError: (e as Error).message }));
   };
   const removeCustDoc = (i: number) =>
     patch((st) => ({
-      custDocs: st.custDocs.filter((_, j) => j !== i),
-      custUploads: st.custUploads.filter((_, j) => j !== i),
+      custDocs: (st.custDocs || []).filter((_, j) => j !== i),
+      custUploads: (st.custUploads || []).filter((_, j) => j !== i),
     }));
 
   const onPolicyFile = (file: File | null) => {
