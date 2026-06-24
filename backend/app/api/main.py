@@ -16,11 +16,9 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from pathlib import Path
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from app.api.routes.claims import router as claims_router
 from app.api.store import ClaimStore
@@ -75,23 +73,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        get_settings().frontend_url,
-        "http://localhost:3000",
-        "http://localhost:3001",
-    ],
+    allow_origins=[get_settings().frontend_url, "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(claims_router)
-
-
-# ── TEMPORARY TEST UI — remove this route + app/api/test_ui.html when done ──
-@app.get("/test-ui", response_class=HTMLResponse, include_in_schema=False)
-async def test_ui():
-    return (Path(__file__).parent / "test_ui.html").read_text()
 
 
 @app.get("/health")

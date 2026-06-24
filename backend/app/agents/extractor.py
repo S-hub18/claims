@@ -146,10 +146,7 @@ class DocExtractor(Agent):
         # Pure offline path: no LLM client at all — lift inline content directly.
         content = doc.get("content") or {}
         quality = doc.get("quality", "GOOD")
-        # Patient identity comes from what is EXTRACTED from the document body
-        # (like every other field below), never from an external file_name or a
-        # supplied patient_name_on_doc hint — those must not influence decisions.
-        patient_name = content.get("patient_name")
+        patient_name = doc.get("patient_name_on_doc") or content.get("patient_name")
         return Fact(
             key=self.writes,
             value={

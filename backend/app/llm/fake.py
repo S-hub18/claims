@@ -35,9 +35,7 @@ class FakeLLMClient:
         content = doc.get("content") or {}
         quality = doc.get("quality", "GOOD")
         readable = quality != "UNREADABLE"
-        # Extracted from the document body only — the external patient_name_on_doc
-        # hint and the file_name must have no impact on the decision.
-        patient_name = content.get("patient_name")
+        patient_name = doc.get("patient_name_on_doc") or content.get("patient_name")
 
         return ExtractionResult(
             file_id=file_id,

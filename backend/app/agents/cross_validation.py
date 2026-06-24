@@ -25,7 +25,7 @@ from app.blackboard import Blackboard, Fact, GateGatedAgent
 from app.policy import Policy
 
 _AMOUNT_TOLERANCE = Decimal("0.01")  # 1%
-_DATE_WINDOW_DAYS = 30
+_DATE_WINDOW_DAYS = 3  # treatment date must match a document date within this many days
 
 
 def _d(value: object) -> Decimal:
@@ -80,18 +80,27 @@ class CrossValidationAgent(GateGatedAgent):
                     f"(₹{bill_total})."
                 )
 
-        # ── Date: document dates vs claimed treatment date ───────────────────
-        if treatment_date is not None:
-            for ext in extractions:
-                content = ext.get("content") or {}
-                doc_date = _parse_date(content.get("date"))
-                if doc_date is None:
-                    continue
-                if abs((doc_date - treatment_date).days) > _DATE_WINDOW_DAYS:
-                    issues.append(
-                        f"The {ext.get('doc_type') or 'document'} is dated {doc_date}, which "
-                        f"does not match the claimed treatment date {treatment_date}."
-                    )
+        # ── Date: the claimed treatment date must line up with at least ONE
+        # document date. Documents legitimately differ from each other (a
+        # prescription a couple of days before the bill is normal), so we don't
+        # flag each doc individually — we require the claim date to MATCH one of
+        # them within a tight window. If it matches none, the claim form and the
+        # evidence disagree → route to manual review.
+        doc_dates: list[tuple[str, date]] = []
+        for ext in extractions:
+            content = ext.get("content") or {}
+            dd = _parse_date(content.get("date"))
+            if dd is not None:
+                doc_dates.append((ext.get("doc_type") or "document", dd))
+
+        if treatment_date is not None and doc_dates:
+            if not any(abs((dd - treatment_date).days) <= _DATE_WINDOW_DAYS for _, dd in doc_dates):
+                roster = ", ".join(f"{dt} dated {dd}" for dt, dd in doc_dates)
+                issues.append(
+                    f"The claimed treatment date {treatment_date} does not match any document "
+                    f"date ({roster}). The claim date must match the treatment shown on the "
+                    f"documents."
+                )
 
         if issues:
             return Fact(

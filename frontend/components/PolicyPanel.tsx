@@ -79,8 +79,8 @@ export function PolicyPanel({ engine }: EngineProps) {
 
       <div style={{ fontWeight: 500, fontSize: 12, lineHeight: 1.5, color: "var(--on-ink-soft)", marginBottom: 14 }}>
         {state.policyUploaded
-          ? "Parsed live from your uploaded file."
-          : "Showing the sample policy_terms.json — upload your own to re-parse instantly."}
+          ? "This claim is adjudicated against your uploaded policy."
+          : "No policy uploaded — the system's default policy is used as a backup. Upload a policy_terms.json to adjudicate this claim against your own."}
       </div>
 
       {state.policyError && (

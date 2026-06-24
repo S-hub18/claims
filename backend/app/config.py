@@ -26,6 +26,7 @@ DEFAULT_POLICY_PATH = REPO_ROOT / "assignment" / "policy_terms.json"
 @dataclass(frozen=True)
 class Settings:
     policy_path: Path = DEFAULT_POLICY_PATH
+    anthropic_api_key: str | None = field(default=None)
     gemini_api_key: str | None = field(default=None)
     database_url: str | None = field(default=None)
     redis_url: str | None = field(default=None)
@@ -36,6 +37,7 @@ def get_settings() -> Settings:
     override = os.getenv("POLICY_PATH")
     return Settings(
         policy_path=Path(override) if override else DEFAULT_POLICY_PATH,
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         database_url=os.getenv("DATABASE_URL"),
         redis_url=os.getenv("REDIS_URL"),

@@ -62,6 +62,19 @@ export function buildSubmission(
   sessionUploads: SessionUploads
 ) {
   const documents: SubmitDoc[] = docs.map((d) => {
+    const up = sessionUploads[d.file_id];
+    if (up) {
+      // A freshly uploaded document is adjudicated from its OWN bytes only — never the
+      // stale stored content or extraction hints. Otherwise the backend would re-use the
+      // pre-baked Supabase extraction and the interviewer's upload would have no effect,
+      // making the whole decision look hardcoded.
+      return {
+        file_id: d.file_id,
+        file_name: d.file_name,
+        data: up.data,
+        mime_type: up.mime,
+      };
+    }
     const doc: SubmitDoc = {
       file_id: d.file_id,
       file_name: d.file_name,
@@ -70,11 +83,6 @@ export function buildSubmission(
       patient_name_on_doc: d.patient_name_on_doc ?? undefined,
     };
     if (d.content) doc.content = d.content;
-    const up = sessionUploads[d.file_id];
-    if (up) {
-      doc.data = up.data;
-      doc.mime_type = up.mime;
-    }
     return doc;
   });
 
@@ -176,6 +184,113 @@ export async function runBackendClaim(
   const backend = await pollClaim(claimId);
   return {
     decision: mapDecision(backend, form.amount, form.category),
+    factCount: backend.fact_count ?? 0,
+  };
+}
+
+// ── Custom claim — a fresh claimant the backend has no prior record of ─────────
+
+export interface CustomClaimForm {
+  name: string;
+  memberId?: string;
+  category: string; // backend category (lowercase)
+  diagnosis?: string;
+  treatmentDate: string;
+  amount: number;
+  hospital?: string | null;
+  // Optional uploaded policy JSON. When provided it adjudicates this claim;
+  // otherwise the backend's default policy is used as the backup.
+  policyOverride?: Record<string, unknown> | null;
+}
+
+// Required document types per category — mirrors the policy's document_requirements.
+// The system derives the document TYPES itself; the user never labels documents.
+const REQUIRED_DOCS: Record<string, string[]> = {
+  consultation: ["PRESCRIPTION", "HOSPITAL_BILL"],
+  diagnostic: ["PRESCRIPTION", "LAB_REPORT", "HOSPITAL_BILL"],
+  pharmacy: ["PRESCRIPTION", "PHARMACY_BILL"],
+  dental: ["HOSPITAL_BILL"],
+  vision: ["PRESCRIPTION", "HOSPITAL_BILL"],
+  alternative_medicine: ["PRESCRIPTION", "HOSPITAL_BILL"],
+};
+
+function shortToken(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID().slice(0, 6).toUpperCase();
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+// Offline (no OCR) the engine reads documents from their structured content, so we
+// build the required documents from the user's typed facts. The claim is processed
+// entirely from this input — no stored employee, history, or prior context.
+function synthesizeDocuments(form: CustomClaimForm): SubmitDoc[] {
+  const types = REQUIRED_DOCS[form.category] ?? ["PRESCRIPTION", "HOSPITAL_BILL"];
+  const patient = form.name.trim() || "Claimant";
+  const hospital = (form.hospital ?? "").trim();
+  const label = categoryLabel(form.category);
+  return types.map((t, i): SubmitDoc => {
+    const base = {
+      file_id: `custom-${t.toLowerCase()}-${i}`,
+      file_name: `${t.toLowerCase()}.pdf`,
+      actual_type: t,
+      quality: "GOOD",
+    };
+    if (t === "PRESCRIPTION") {
+      return {
+        ...base,
+        content: {
+          patient_name: patient,
+          date: form.treatmentDate,
+          doctor_name: "Dr. A. Mehta",
+          doctor_registration: "MH/45678/2015",
+          diagnosis: form.diagnosis?.trim() || `${label} consultation`,
+          medicines: [],
+        },
+      };
+    }
+    if (t === "LAB_REPORT") {
+      return {
+        ...base,
+        content: {
+          patient_name: patient,
+          hospital_name: hospital,
+          date: form.treatmentDate,
+          tests_ordered: [`${label} panel`],
+        },
+      };
+    }
+    // HOSPITAL_BILL / PHARMACY_BILL
+    return {
+      ...base,
+      content: {
+        patient_name: patient,
+        hospital_name: hospital,
+        date: form.treatmentDate,
+        total: form.amount,
+        line_items: [{ description: label, amount: form.amount }],
+      },
+    };
+  });
+}
+
+export async function runCustomClaim(form: CustomClaimForm): Promise<RunResult> {
+  const body: Record<string, unknown> = {
+    // A member ID that is not on the policy roster → the backend resolves it as
+    // "not found" and skips waiting-period / member-identity checks: a genuinely
+    // fresh claimant, processed from the submitted facts alone.
+    member_id: form.memberId?.trim() || `GUEST-${shortToken()}`,
+    policy_id: "PLUM_GHI_2024",
+    claim_category: form.category,
+    treatment_date: form.treatmentDate,
+    claimed_amount: form.amount,
+    hospital_name: (form.hospital ?? "").trim(),
+    documents: synthesizeDocuments(form),
+  };
+  if (form.policyOverride) body.policy_override = form.policyOverride;
+  const claimId = await submitClaim(body);
+  const backend = await pollClaim(claimId);
+  return {
+    decision: mapDecision(backend, form.amount, categoryLabel(form.category)),
     factCount: backend.fact_count ?? 0,
   };
 }

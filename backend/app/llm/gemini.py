@@ -1,4 +1,4 @@
-"""Gemini vision extraction + reasoning client (model: gemini-3.1-flash-lite).
+"""Gemini vision extraction + reasoning client (model: gemini-2.5-flash, override with GEMINI_MODEL).
 
 Uses the current ``google-genai`` SDK (not the deprecated ``google-generativeai``).
 Structured JSON output via ``response_mime_type`` — no regex parsing of free text.
@@ -27,7 +27,7 @@ from google.genai import types
 
 from .base import ExtractionResult
 
-MODEL = "gemini-3.1-flash-lite"
+MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 REREAD_THRESHOLD = 0.70
 _MAX_RETRIES = 4  # transient 429/503 backoff: 1s, 2s, 4s, then give up
 

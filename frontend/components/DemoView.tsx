@@ -152,18 +152,17 @@ export function DemoView({ engine }: EngineProps) {
                         {d.is_user_uploaded ? " · yours" : ""}
                       </span>
                     </span>
-                    {d.is_user_uploaded && (
-                      <button
-                        className="doc-x"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeDoc(d);
-                        }}
-                        aria-label="Remove"
-                      >
-                        ×
-                      </button>
-                    )}
+                    <button
+                      className="doc-x"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeDoc(d);
+                      }}
+                      aria-label="Remove"
+                      title={d.is_user_uploaded ? "Remove" : "Remove from this run"}
+                    >
+                      ×
+                    </button>
                   </div>
                 ))}
                 <label className="attach" style={state.uploadingDoc ? { opacity: 0.6 } : undefined}>
@@ -207,7 +206,7 @@ export function DemoView({ engine }: EngineProps) {
                     className="input"
                     type="text"
                     inputMode="numeric"
-                    value={state.amount ? state.amount.toLocaleString("en-IN") : ""}
+                    value={state.amount || ""}
                     placeholder="0"
                     onChange={(e) => {
                       const digits = e.target.value.replace(/[^0-9]/g, "");
@@ -225,6 +224,10 @@ export function DemoView({ engine }: EngineProps) {
                     onChange={(e) => patch({ hospital: e.target.value })}
                   />
                 </div>
+              </div>
+
+              <div style={{ fontSize: 12, lineHeight: 1.45, color: "var(--muted-soft)", marginTop: 8 }}>
+                Anything you leave blank is read from the uploaded documents.
               </div>
 
               {state.apiError && (

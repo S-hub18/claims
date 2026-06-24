@@ -32,6 +32,10 @@ class ClaimSubmission(BaseModel):
     claims_history: list[dict[str, Any]] = Field(default_factory=list)
     simulate_component_failure: bool = False
     documents: list[DocumentInput] = Field(default_factory=list)
+    # Optional caller-supplied policy. When present and valid it adjudicates this
+    # one claim; otherwise the server's default policy is used as the backup. Not
+    # part of to_engine_dict — the route resolves it into a Policy separately.
+    policy_override: dict[str, Any] | None = None
 
     def to_engine_dict(self) -> dict[str, Any]:
         """Convert to the flat dict the engine's adjudicate() expects."""

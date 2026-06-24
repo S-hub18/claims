@@ -63,11 +63,18 @@ async def _adjudicate_bg(
     if record is None:
         return
     try:
-        llm_client = (
-            GeminiClient(api_key=settings.gemini_api_key)
-            if settings.gemini_api_key
-            else None
-        )
+        # Extraction provider: prefer Anthropic (Claude) when its key is set, else
+        # Gemini, else None → pure-offline content-lift. A bad key never crashes the
+        # claim: fall back to offline so the demo (inline content) still adjudicates.
+        llm_client = None
+        try:
+            if settings.anthropic_api_key:
+                from app.llm.anthropic_client import AnthropicClient
+                llm_client = AnthropicClient(api_key=settings.anthropic_api_key)
+            elif settings.gemini_api_key:
+                llm_client = GeminiClient(api_key=settings.gemini_api_key)
+        except Exception:
+            llm_client = None
         decision = await run_claim(
             submission_dict,
             policy,
@@ -82,6 +89,21 @@ async def _adjudicate_bg(
     await store.persist(record)
 
 
+def _resolve_policy(override: dict[str, Any] | None, default: Policy) -> Policy:
+    """Use the caller-supplied policy when it is present and well-formed;
+    otherwise fall back to the server's default policy as a backup."""
+    if not override:
+        return default
+    # The engine relies on these sections — a malformed upload silently falls back
+    # rather than failing the claim.
+    if not all(k in override for k in ("coverage", "document_requirements", "opd_categories")):
+        return default
+    try:
+        return Policy(override)
+    except Exception:
+        return default
+
+
 @router.post("", response_model=SubmitResponse, status_code=202)
 async def submit_claim(
     body: ClaimSubmission,
@@ -90,7 +112,7 @@ async def submit_claim(
     settings: Settings = Depends(get_settings),
 ) -> SubmitResponse:
     store: ClaimStore = request.app.state.store
-    policy: Policy = request.app.state.policy
+    policy: Policy = _resolve_policy(body.policy_override, request.app.state.policy)
     claim_id = str(uuid.uuid4())
     store.create(claim_id)
     background_tasks.add_task(

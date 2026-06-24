@@ -1,12 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  computeCustomDecision,
-  computeDecision,
-  computeRun,
-  type DecisionCtx,
-} from "./decision";
 import { fmt, filesToObjs } from "./format";
 import { DEFAULT_POLICY } from "./policy";
 import { TEST_CASES } from "./testcases";
@@ -18,23 +12,18 @@ import {
   type Employee,
   type EmployeeDocument,
 } from "./db";
-import { runBackendClaim, categoryLabel, type SessionUploads } from "./api";
+import { runBackendClaim, runCustomClaim, categoryLabel, type SessionUploads } from "./api";
 import type {
   Decision,
   DocFile,
   EvalResult,
   HistoryRow,
   Policy,
-  RunPlan,
-  Scenario,
   Status,
   TestCase,
   TraceFact,
   View,
 } from "./types";
-
-// Brief "adjudicating…" delay before the result panel appears (custom claim sim only).
-const ADJUDICATE_MS = 750;
 
 export interface EngineState {
   view: View;
@@ -58,7 +47,8 @@ export interface EngineState {
   custId: string;
   custDocs: DocFile[];
   custDate: string;
-  custTreatment: string;
+  custTreatment: string; // backend category (lowercase)
+  custDiagnosis: string;
   custAmount: number;
   custHospital: string;
   // policy + dev config
@@ -114,6 +104,7 @@ const INITIAL: EngineState = {
   custDocs: [],
   custDate: "2024-09-18",
   custTreatment: "consultation",
+  custDiagnosis: "",
   custAmount: 4500,
   custHospital: "Apollo Hospitals",
   policy: null,
@@ -156,6 +147,7 @@ function newClaimId() {
   claimSeq = (claimSeq + 0x137) & 0xffff;
   return "#" + claimSeq.toString(16).toUpperCase().padStart(4, "0");
 }
+
 
 export function useClaimEngine() {
   const [s, setS] = useState<EngineState>(INITIAL);
@@ -276,6 +268,10 @@ export function useClaimEngine() {
         delete su[doc.file_id];
         return { employeeDocs: st.employeeDocs.filter((d) => d.id !== doc.id), sessionUploads: su };
       });
+      // Only a doc the interviewer uploaded this session is deleted from Supabase. A seed
+      // doc is removed from THIS run's claim only — its Supabase row is left intact so the
+      // profile is unchanged on the next run (lets them safely drop the bad doc and retry).
+      if (!doc.is_user_uploaded) return;
       try {
         await deleteEmployeeDocument(doc);
       } catch (e) {
@@ -372,80 +368,76 @@ export function useClaimEngine() {
     pushHistory,
   ]);
 
-  // ── CUSTOM run — client-side simulation (unchanged) ─────────────────────────
-  const ctxFromCustom = useCallback(
-    (): DecisionCtx => ({
-      amount: s.custAmount,
-      treatment: s.custTreatment,
-      enrolled: 12,
-      subLimitScope: s.subLimitScope,
-      confThreshold: s.confThreshold,
-      disabled: s.disabled,
-      policyVersion: s.policyVersion,
-    }),
-    [s.custAmount, s.custTreatment, s.subLimitScope, s.confThreshold, s.disabled, s.policyVersion]
-  );
-
-  const runCustomSim = useCallback(
-    (scenario: Scenario, ctx: DecisionCtx, decOverride: Decision) => {
-      clearTimers();
-      const plan: RunPlan = computeRun(scenario, ctx, decOverride);
-      const elapsed = plan.elapsedMs / 1000;
-      patch({
-        running: true,
-        hasDecision: false,
-        decision: null,
-        facts: [],
-        agentsFired: 0,
-        elapsed: 0,
-        toast: null,
-        traceOpen: false,
-        lastSource: "custom",
-      });
-      timers.current.push(
-        setTimeout(() => {
-          const decided: Decision = { ...plan.decision, claimId: newClaimId() };
-          patch({
-            running: false,
-            hasDecision: true,
-            decision: decided,
-            facts: plan.facts,
-            agentsFired: plan.agentsFired,
-            elapsed,
-            toast: { status: decided.status, sub: TOAST_TIP[decided.status] || "" },
-          });
-          pushHistory(decided, s.custName || "Custom member", s.custTreatment, elapsed);
-          timers.current.push(setTimeout(() => patch({ toast: null }), 4400));
-        }, ADJUDICATE_MS)
-      );
-    },
-    [clearTimers, patch, pushHistory, s.custName, s.custTreatment]
-  );
-
-  const runCustom = useCallback(() => {
+  // ── CUSTOM run — a fresh claimant, adjudicated on the backend ────────────────
+  // No stored employee, history, or prior context: the typed facts are submitted
+  // to the engine and processed as if seen for the first time.
+  const runCustom = useCallback(async () => {
     if (s.running) return;
-    const { dec, scenario } = computeCustomDecision(
-      {
-        custTreatment: s.custTreatment,
-        custAmount: s.custAmount,
-        custHospital: s.custHospital,
-        confThreshold: s.confThreshold,
-      },
-      activePolicy()
-    );
-    // computeDecision keeps the sim's richer waterfall when scenario is a sim scenario
-    const ctx = ctxFromCustom();
-    const simDec = scenario === "approved" || scenario === "partial" ? computeDecision(scenario, ctx) : dec;
-    runCustomSim(scenario, ctx, simDec.waterfall.length ? simDec : dec);
+    clearTimers();
+    patch({
+      running: true,
+      hasDecision: false,
+      decision: null,
+      facts: [],
+      agentsFired: 0,
+      elapsed: 0,
+      toast: null,
+      traceOpen: false,
+      lastSource: "custom",
+      apiError: null,
+    });
+    const t0 = performance.now();
+    try {
+      const hospital = s.custHospital.startsWith("Other") ? "" : s.custHospital;
+      const { decision, factCount } = await runCustomClaim({
+        name: s.custName,
+        memberId: s.custId,
+        category: s.custTreatment,
+        diagnosis: s.custDiagnosis,
+        treatmentDate: s.custDate,
+        amount: s.custAmount,
+        hospital,
+        // Only override when the user actually uploaded a policy — otherwise the
+        // backend falls back to its default policy as the backup.
+        policyOverride: s.policyUploaded
+          ? (s.policy as unknown as Record<string, unknown>)
+          : undefined,
+      });
+      const elapsed = (performance.now() - t0) / 1000;
+      patch({
+        running: false,
+        hasDecision: true,
+        decision,
+        agentsFired: factCount,
+        elapsed,
+        toast: { status: decision.status, sub: TOAST_TIP[decision.status] || "" },
+      });
+      pushHistory(decision, s.custName || "Custom claimant", categoryLabel(s.custTreatment), elapsed);
+      timers.current.push(setTimeout(() => patch({ toast: null }), 4400));
+    } catch (e) {
+      const msg = (e as Error).message || String(e);
+      patch({
+        running: false,
+        apiError: msg,
+        toast: { status: "MANUAL_REVIEW", sub: "Could not reach the adjudication backend." },
+      });
+      timers.current.push(setTimeout(() => patch({ toast: null }), 4400));
+    }
   }, [
     s.running,
+    s.custName,
+    s.custId,
     s.custTreatment,
+    s.custDiagnosis,
+    s.custDate,
+    s.custDiagnosis,
     s.custAmount,
     s.custHospital,
-    s.confThreshold,
-    activePolicy,
-    ctxFromCustom,
-    runCustomSim,
+    s.policy,
+    s.policyUploaded,
+    clearTimers,
+    patch,
+    pushHistory,
   ]);
 
   const rerun = useCallback(() => {
@@ -475,9 +467,13 @@ export function useClaimEngine() {
     [clearTimers, patch]
   );
 
-  // custom file handlers
-  const onCustFiles = (files: FileList | null) =>
-    patch((st) => ({ custDocs: [...st.custDocs, ...filesToObjs(files)] }));
+  // custom file handlers — materialize the file objects synchronously. `files` is
+  // the input's live FileList; the onChange caller clears the input right after,
+  // so reading it lazily inside the patch updater would see an empty list.
+  const onCustFiles = (files: FileList | null) => {
+    const objs = filesToObjs(files);
+    if (objs.length) patch((st) => ({ custDocs: [...st.custDocs, ...objs] }));
+  };
   const removeCustDoc = (i: number) =>
     patch((st) => ({ custDocs: st.custDocs.filter((_, j) => j !== i) }));
 
@@ -536,8 +532,10 @@ export function useClaimEngine() {
     patch((st) => ({ customEvals: [...st.customEvals, c], newEvalName: "", evalFiles: [] }));
   }, [patch, s.customEvals.length, s.newEvalName, s.newEvalDoc, s.newEvalExp]);
 
-  const onEvalFiles = (files: FileList | null) =>
-    patch((st) => ({ evalFiles: [...st.evalFiles, ...filesToObjs(files)] }));
+  const onEvalFiles = (files: FileList | null) => {
+    const objs = filesToObjs(files);
+    if (objs.length) patch((st) => ({ evalFiles: [...st.evalFiles, ...objs] }));
+  };
 
   return {
     state: s,
