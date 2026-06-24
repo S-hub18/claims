@@ -12,7 +12,13 @@ import {
   type Employee,
   type EmployeeDocument,
 } from "./db";
-import { runBackendClaim, runCustomClaim, categoryLabel, type SessionUploads } from "./api";
+import {
+  runBackendClaim,
+  runCustomClaim,
+  categoryLabel,
+  type SessionUploads,
+  type CustomUpload,
+} from "./api";
 import type {
   Decision,
   DocFile,
@@ -46,6 +52,7 @@ export interface EngineState {
   custName: string;
   custId: string;
   custDocs: DocFile[];
+  custUploads: CustomUpload[];
   custDate: string;
   custTreatment: string; // backend category (lowercase)
   custDiagnosis: string;
@@ -102,6 +109,7 @@ const INITIAL: EngineState = {
   custName: "",
   custId: "",
   custDocs: [],
+  custUploads: [],
   custDate: "2024-09-18",
   custTreatment: "consultation",
   custDiagnosis: "",
@@ -146,6 +154,16 @@ let claimSeq = 0xa10;
 function newClaimId() {
   claimSeq = (claimSeq + 0x137) & 0xffff;
   return "#" + claimSeq.toString(16).toUpperCase().padStart(4, "0");
+}
+
+let custUploadSeq = 0;
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 
@@ -397,6 +415,8 @@ export function useClaimEngine() {
         treatmentDate: s.custDate,
         amount: s.custAmount,
         hospital,
+        // Real uploaded documents drive the claim when present (Claude reads them).
+        uploads: s.custUploads.length ? s.custUploads : undefined,
         // Only override when the user actually uploaded a policy — otherwise the
         // backend falls back to its default policy as the backup.
         policyOverride: s.policyUploaded
@@ -433,6 +453,7 @@ export function useClaimEngine() {
     s.custDiagnosis,
     s.custAmount,
     s.custHospital,
+    s.custUploads,
     s.policy,
     s.policyUploaded,
     clearTimers,
@@ -467,15 +488,33 @@ export function useClaimEngine() {
     [clearTimers, patch]
   );
 
-  // custom file handlers — materialize the file objects synchronously. `files` is
-  // the input's live FileList; the onChange caller clears the input right after,
-  // so reading it lazily inside the patch updater would see an empty list.
-  const onCustFiles = (files: FileList | null) => {
-    const objs = filesToObjs(files);
-    if (objs.length) patch((st) => ({ custDocs: [...st.custDocs, ...objs] }));
+  // custom file handlers — capture the File objects synchronously (the onChange
+  // caller clears the input right after), then read their bytes to base64 so the
+  // real uploaded documents can be sent to the backend for Claude to extract.
+  const onCustFiles = (fileList: FileList | null) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const display = filesToObjs(files); // {name, icon, meta} for the UI list
+    Promise.all(files.map((f) => fileToBase64(f)))
+      .then((b64s) => {
+        const uploads: CustomUpload[] = files.map((f, i) => ({
+          file_id: `custom-up-${++custUploadSeq}`,
+          file_name: f.name,
+          data: b64s[i],
+          mime: f.type || "application/octet-stream",
+        }));
+        patch((st) => ({
+          custDocs: [...st.custDocs, ...display],
+          custUploads: [...st.custUploads, ...uploads],
+        }));
+      })
+      .catch((e) => patch({ apiError: (e as Error).message }));
   };
   const removeCustDoc = (i: number) =>
-    patch((st) => ({ custDocs: st.custDocs.filter((_, j) => j !== i) }));
+    patch((st) => ({
+      custDocs: st.custDocs.filter((_, j) => j !== i),
+      custUploads: st.custUploads.filter((_, j) => j !== i),
+    }));
 
   const onPolicyFile = (file: File | null) => {
     if (!file) return;

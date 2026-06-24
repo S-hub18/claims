@@ -190,6 +190,14 @@ export async function runBackendClaim(
 
 // ── Custom claim — a fresh claimant the backend has no prior record of ─────────
 
+/** A real document the user uploaded — sent as bytes for the backend to extract. */
+export interface CustomUpload {
+  file_id: string;
+  file_name: string;
+  data: string; // base64 (no data: prefix)
+  mime: string;
+}
+
 export interface CustomClaimForm {
   name: string;
   memberId?: string;
@@ -198,6 +206,10 @@ export interface CustomClaimForm {
   treatmentDate: string;
   amount: number;
   hospital?: string | null;
+  // Real uploaded documents. When present they are sent as bytes and the backend
+  // (Claude) extracts them — doc type, patient, dates, amounts all read from the
+  // file. When absent, the typed fields are synthesized into documents instead.
+  uploads?: CustomUpload[];
   // Optional uploaded policy JSON. When provided it adjudicates this claim;
   // otherwise the backend's default policy is used as the backup.
   policyOverride?: Record<string, unknown> | null;
@@ -284,7 +296,16 @@ export async function runCustomClaim(form: CustomClaimForm): Promise<RunResult> 
     treatment_date: form.treatmentDate,
     claimed_amount: form.amount,
     hospital_name: (form.hospital ?? "").trim(),
-    documents: synthesizeDocuments(form),
+    // Real uploads → send the bytes for Claude to read; else synthesize from fields.
+    documents:
+      form.uploads && form.uploads.length
+        ? form.uploads.map((u) => ({
+            file_id: u.file_id,
+            file_name: u.file_name,
+            data: u.data,
+            mime_type: u.mime,
+          }))
+        : synthesizeDocuments(form),
   };
   if (form.policyOverride) body.policy_override = form.policyOverride;
   const claimId = await submitClaim(body);
