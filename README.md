@@ -19,7 +19,7 @@
 
 ## Overview
 
-Adjudicating an OPD claim requires six judgments made together: *who is the member, are the documents valid, what does the policy say, does the math hold, is there a fraud signal, and how confident is the decision.* ClaimStream models each of those as an **independent agent on a shared blackboard**. Agents do not call one another — they read facts and write facts, and the scheduler fires each one the instant its inputs exist. Execution order is **derived from data dependencies, not wired by hand**. The result is fast, fully explainable, and degrades gracefully when any single component fails.
+Adjudicating an OPD claim requires six judgments made together: *who is the member, are the documents valid, what does the policy say, does the math hold, is there a fraud signal, and how confident is the decision.* Claims Adjudication models each of those as an **independent agent on a shared blackboard**. Agents do not call one another — they read facts and write facts, and the scheduler fires each one the instant its inputs exist. Execution order is **derived from data dependencies, not wired by hand**. The result is fast, fully explainable, and degrades gracefully when any single component fails.
 
 ---
 
@@ -40,7 +40,7 @@ The only inputs provided were the `assignment/` package — the specification, `
 
 ## The Core Idea — a Blackboard, not a Pipeline
 
-The conventional approach is a **DAG** or a single **LangGraph** spanning the whole flow. ClaimStream uses a blackboard instead, for one decisive reason.
+The conventional approach is a **DAG** or a single **LangGraph** spanning the whole flow. Claims Adjudication uses a blackboard instead, for one decisive reason.
 
 A DAG fixes execution order explicitly — every new check means editing the graph. A *phased* DAG also forces **one global speed-vs-confidence choice** per claim: it waits at a barrier for *all* extraction to finish before *any* rule runs. But the checks do not need the same inputs:
 
